@@ -14,13 +14,13 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     using FunctionsRequest for FunctionsRequest.Request;
     using OracleLib for AggregatorV3Interface;
 
-    struct dWorkConfig {
-        address gallery;
-        string workName;
-        string workSymbol;
-        address functionsRouter;
-        bytes32 donId;
-    }
+    // struct dWorkConfig {
+    //     address gallery;
+    //     string workName;
+    //     string workSymbol;
+    //     address functionsRouter;
+    //     bytes32 donId;
+    // }
 
     // Chainlink Functions
     bytes32 public s_lastRequestId;
@@ -49,15 +49,20 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     error dWork__UnexpectedRequestID(bytes32 requestId);
 
     constructor(
-        dWorkConfig memory _config
+        uint64 _subId,
+        bytes32 _donId,
+        address _gallery,
+        string memory _workName,
+        string memory _workSymbol,
+        address _functionsRouter
     )
-        FunctionsClient(_config.functionsRouter)
+        FunctionsClient(_functionsRouter)
         Ownable(msg.sender)
-        ERC721(_config.workName, _config.workSymbol)
+        ERC721(_workName, _workSymbol)
     {
-        s_gallery = _config.gallery;
-        s_donID = _config.donId;
-        s_functionsRouter = _config.functionsRouter;
+        s_gallery = _gallery;
+        s_donID = _donId;
+        s_functionsRouter = _functionsRouter;
     }
 
     function performWorkVerification(string memory _workId) external onlyOwner {
