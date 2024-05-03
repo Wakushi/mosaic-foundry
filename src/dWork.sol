@@ -10,33 +10,49 @@ import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {OracleLib, AggregatorV3Interface} from "./libraries/OracleLib.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
+// work json example
+// https://peach-genuine-lamprey-766.mypinata.cloud/ipfs/QmSimNV6bDWiVocmH1xqkQwBeRKDuUWmMP2CNu4tfi2vfK
+
 contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
+    ///////////////////
+    // Type declarations
+    ///////////////////
+
     using FunctionsRequest for FunctionsRequest.Request;
     using OracleLib for AggregatorV3Interface;
 
-    // struct dWorkConfig {
-    //     address gallery;
-    //     string workName;
-    //     string workSymbol;
-    //     address functionsRouter;
-    //     bytes32 donId;
-    // }
+    struct WorkVerificationRequest {
+        string workID;
+        uint256 requestAt;
+    }
+
+    ///////////////////
+    // State variables
+    ///////////////////
 
     // Chainlink Functions
-    bytes32 public s_lastRequestId;
-    bytes public s_lastResponse;
-    bytes public s_lastError;
-    string s_workVerificationSource;
+    address s_functionsRouter;
     bytes32 s_donID;
     uint32 s_gasLimit = 300000;
-    address s_functionsRouter;
+    uint64 s_subscriptionId;
+    bytes s_lastResponse;
+    bytes s_lastError;
+    string s_workVerificationSource;
+    bytes32 s_lastRequestId;
 
-    string public constant BASE_URI =
-        "https://peach-genuine-lamprey-766.mypinata.cloud/ipfs/";
+    mapping(bytes32 requestId => WorkVerificationRequest request)
+        private s_requestIdToRequest;
+
     string public s_workURI;
     bool public s_isMinted;
     address public s_gallery;
     uint256 public s_lastVerifiedAt;
+    string public constant BASE_URI =
+        "https://peach-genuine-lamprey-766.mypinata.cloud/ipfs/";
+
+    ///////////////////
+    // Events
+    ///////////////////
 
     event Response(
         bytes32 indexed requestId,
@@ -45,11 +61,23 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         bytes err
     );
 
+    //////////////////
+    // Errors
+    ///////////////////
+
     error dWork__AlreadyMinted();
     error dWork__UnexpectedRequestID(bytes32 requestId);
 
+    //////////////////
+    // Modifiers
+    //////////////////
+
+    modifier notMinted() {
+        _ensureNotMinted();
+        _;
+    }
+
     constructor(
-        uint64 _subId,
         bytes32 _donId,
         address _gallery,
         string memory _workName,
@@ -65,27 +93,47 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         s_functionsRouter = _functionsRouter;
     }
 
-    function performWorkVerification(string memory _workId) external onlyOwner {
-        // Goal: Verify that the work is original, unique and owned by the gallery
-        //
+    ////////////////////
+    // External / Public
+    ////////////////////
+
+    function setCFSubId(uint64 _subscriptionId) external onlyOwner {
+        s_subscriptionId = _subscriptionId;
     }
 
-    function sendRequest(
-        uint64 subscriptionId,
-        string[] calldata args
-    ) external onlyOwner returns (bytes32 requestId) {
-        FunctionsRequest.Request memory req;
-        req.initializeRequestForInlineJavaScript(s_workVerificationSource); // Initialize the request with JS code
-        if (args.length > 0) req.setArgs(args); // Set the arguments for the request
+    function requestWorkVerification(
+        string[] calldata _args
+    ) external onlyOwner notMinted {
+        // Goal: Verify that the work is original, unique and owned by the gallery
+        _sendRequest(_args);
+    }
 
-        // Send the request and store the request ID
+    ////////////////////
+    // Internal
+    ////////////////////
+
+    // Args : [workID, galleryAddress, workURI]
+
+    function _sendRequest(
+        string[] calldata args
+    ) internal onlyOwner returns (bytes32 requestId) {
+        FunctionsRequest.Request memory req;
+        req.initializeRequestForInlineJavaScript(s_workVerificationSource);
+        if (args.length > 0) {
+            req.setArgs(args);
+        }
+
         s_lastRequestId = _sendRequest(
             req.encodeCBOR(),
-            subscriptionId,
+            s_subscriptionId,
             s_gasLimit,
             s_donID
         );
 
+        s_requestIdToRequest[s_lastRequestId] = WorkVerificationRequest(
+            args[0],
+            block.timestamp
+        );
         return s_lastRequestId;
     }
 
@@ -114,10 +162,11 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     }
 
     function _mintWork() internal {
-        if (s_isMinted) {
-            revert dWork__AlreadyMinted();
-        }
         s_isMinted = true;
         _safeMint(s_gallery, 0);
+    }
+
+    function _ensureNotMinted() internal view returns (bool) {
+        return s_isMinted;
     }
 }
