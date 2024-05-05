@@ -10,6 +10,7 @@ contract HelperConfig is Script {
     struct NetworkConfig {
         bytes32 donId;
         address functionsRouter;
+        address priceFeed;
     }
 
     uint256 public constant DEFAULT_ANVIL_KEY =
@@ -30,7 +31,8 @@ contract HelperConfig is Script {
         return
             NetworkConfig({
                 donId: bytes32("fun-polygon-amoy-1"),
-                functionsRouter: 0xC22a79eBA640940ABB6dF0f7982cc119578E11De
+                functionsRouter: 0xC22a79eBA640940ABB6dF0f7982cc119578E11De,
+                priceFeed: 0xF0d50568e3A7e8259E16663972b11910F89BD8e7
             });
     }
 
@@ -57,7 +59,8 @@ contract HelperConfig is Script {
         return
             NetworkConfig({
                 donId: bytes32("fun-ethereum-sepolia-1"),
-                functionsRouter: 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419
+                functionsRouter: 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419,
+                priceFeed: address(mockPriceFeed)
             });
     }
 }

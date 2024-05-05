@@ -6,5 +6,6 @@ interface IGetDWorkFactoryReturnTypes {
         address functionsRouter;
         bytes32 donId;
         string workVerificationSource;
+        address priceFeed;
     }
 }

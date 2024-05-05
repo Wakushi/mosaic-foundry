@@ -10,13 +10,6 @@ import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {OracleLib, AggregatorV3Interface} from "./libraries/OracleLib.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
-// work json example
-// https://peach-genuine-lamprey-766.mypinata.cloud/ipfs/QmSimNV6bDWiVocmH1xqkQwBeRKDuUWmMP2CNu4tfi2vfK
-// report json example
-// https://peach-genuine-lamprey-766.mypinata.cloud/ipfs/QmPySAgZUaYPxBfHQnToLwNWaFswuYiueUjr7Yy9ERfyhF
-// analytics reponse json mock
-// https://peach-genuine-lamprey-766.mypinata.cloud/ipfs/QmV1jndyEv2AqTuZNAC9jUiKARtA6nLdwXGVh5wiiuTrJd
-
 contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     ///////////////////
     // Type declarations
@@ -35,26 +28,28 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     ///////////////////
 
     // Chainlink Functions
-    // ---- CONFIG ----
     address s_functionsRouter;
     bytes32 s_donID;
     uint32 s_gasLimit = 300000;
     uint64 s_subscriptionId;
     string s_workVerificationSource;
-    // ---- STATE ----
     bytes s_lastResponse;
     bytes s_lastError;
     bytes32 s_lastRequestId;
 
     mapping(bytes32 requestId => WorkVerificationRequest request)
         private s_requestIdToRequest;
-
-    string public s_workURI;
-    bool public s_isMinted;
-    address public s_customer;
-    uint256 public s_lastVerifiedAt;
-    string public constant BASE_URI =
+    address immutable i_factoryAddress;
+    string constant BASE_URI =
         "https://peach-genuine-lamprey-766.mypinata.cloud/ipfs/";
+
+    // Work
+    uint256 s_workPriceUsd;
+    string s_workURI;
+    bool s_isMinted;
+    bool s_isFractionalized;
+    address s_customer;
+    uint256 s_lastVerifiedAt;
 
     ///////////////////
     // Events
@@ -62,7 +57,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     event Response(
         bytes32 indexed requestId,
-        string character,
+        uint256 workPrice,
         bytes response,
         bytes err
     );
@@ -73,6 +68,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     error dWork__AlreadyMinted();
     error dWork__UnexpectedRequestID(bytes32 requestId);
+    error dWork__NotOwnerOrFactory();
 
     //////////////////
     // Modifiers
@@ -95,7 +91,8 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         address _customer,
         string memory _workName,
         string memory _workSymbol,
-        string memory _workURI
+        string memory _workURI,
+        address _factoryAddress
     )
         FunctionsClient(_functionsRouter)
         Ownable(msg.sender)
@@ -106,15 +103,12 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         s_workVerificationSource = _workVerificationSource;
         s_customer = _customer;
         s_workURI = _workURI;
+        i_factoryAddress = _factoryAddress;
     }
 
     ////////////////////
     // External / Public
     ////////////////////
-
-    function setCFSubId(uint64 _subscriptionId) external onlyOwner {
-        s_subscriptionId = _subscriptionId;
-    }
 
     /**
      *
@@ -127,13 +121,22 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         _sendRequest(_args);
     }
 
+    function setIsFractionalized(bool _isFractionalized) external {
+        _ensureOwnerOrFactory();
+        s_isFractionalized = _isFractionalized;
+    }
+
+    function setCFSubId(uint64 _subscriptionId) external onlyOwner {
+        s_subscriptionId = _subscriptionId;
+    }
+
     ////////////////////
     // Internal
     ////////////////////
 
     function _sendRequest(
         string[] calldata args
-    ) internal onlyOwner returns (bytes32 requestId) {
+    ) internal returns (bytes32 requestId) {
         FunctionsRequest.Request memory req;
         req.initializeRequestForInlineJavaScript(s_workVerificationSource);
         if (args.length > 0) {
@@ -154,6 +157,13 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         return s_lastRequestId;
     }
 
+    /**
+     *
+     * @param requestId Chainlink request ID
+     * @param response Response from the Chainlink DON
+     * @param err Error message from the Chainlink DON
+     * @dev Callback function to receive the response from the Chainlink DON after the work verification request
+     */
     function fulfillRequest(
         bytes32 requestId,
         bytes memory response,
@@ -162,20 +172,18 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         if (s_lastRequestId != requestId) {
             revert dWork__UnexpectedRequestID(requestId);
         }
-        s_lastResponse = response;
 
-        // Decode the response data and check if the work is validated
-        string memory isValid = string(response);
-        if (
-            keccak256(abi.encodePacked(isValid)) ==
-            keccak256(abi.encodePacked("true"))
-        ) {
+        s_lastResponse = response;
+        uint256 workPrice = uint256(bytes32(response));
+
+        if (workPrice > 0) {
             _mintWork();
+            s_workPriceUsd = workPrice;
         }
 
         s_lastError = err;
 
-        emit Response(requestId, isValid, s_lastResponse, s_lastError);
+        emit Response(requestId, workPrice, s_lastResponse, s_lastError);
     }
 
     function _mintWork() internal {
@@ -183,7 +191,39 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         _safeMint(s_customer, 0);
     }
 
-    function _ensureNotMinted() internal view returns (bool) {
+    function _ensureNotMinted() internal view {
+        if (isMinted()) {
+            revert dWork__AlreadyMinted();
+        }
+    }
+
+    function _ensureOwnerOrFactory() internal view {
+        if (msg.sender != owner() && msg.sender != i_factoryAddress) {
+            revert dWork__NotOwnerOrFactory();
+        }
+    }
+
+    function isMinted() public view returns (bool) {
         return s_isMinted;
+    }
+
+    function isFractionalized() external view returns (bool) {
+        return s_isFractionalized;
+    }
+
+    function getWorkPriceUsd() external view returns (uint256) {
+        return s_workPriceUsd;
+    }
+
+    function getWorkURI() external view returns (string memory) {
+        return s_workURI;
+    }
+
+    function getCustomer() external view returns (address) {
+        return s_customer;
+    }
+
+    function getLastVerifiedAt() external view returns (uint256) {
+        return s_lastVerifiedAt;
     }
 }

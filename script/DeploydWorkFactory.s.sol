@@ -19,7 +19,8 @@ contract DeployDWorkFactory is Script {
         deployDWorkFactory(
             dWorkFactoryReturnType.functionsRouter,
             dWorkFactoryReturnType.donId,
-            dWorkFactoryReturnType.workVerificationSource
+            dWorkFactoryReturnType.workVerificationSource,
+            dWorkFactoryReturnType.priceFeed
         );
         vm.stopBroadcast();
     }
@@ -29,10 +30,17 @@ contract DeployDWorkFactory is Script {
         returns (IGetDWorkFactoryReturnTypes.GetDWorkFactoryReturnType memory)
     {
         HelperConfig helperConfig = new HelperConfig();
-        (bytes32 donId, address functionsRouter) = helperConfig
-            .activeNetworkConfig();
+        (
+            bytes32 donId,
+            address functionsRouter,
+            address priceFeed
+        ) = helperConfig.activeNetworkConfig();
 
-        if (functionsRouter == address(0) || donId == bytes32(0)) {
+        if (
+            functionsRouter == address(0) ||
+            donId == bytes32(0) ||
+            priceFeed == address(0)
+        ) {
             revert("something is wrong");
         }
         string memory workVerificationSource = vm.readFile(
@@ -42,20 +50,23 @@ contract DeployDWorkFactory is Script {
             IGetDWorkFactoryReturnTypes.GetDWorkFactoryReturnType(
                 functionsRouter,
                 donId,
-                workVerificationSource
+                workVerificationSource,
+                priceFeed
             );
     }
 
     function deployDWorkFactory(
         address _functionsRouter,
         bytes32 _donId,
-        string memory _workVerificationSource
+        string memory _workVerificationSource,
+        address priceFeed
     ) public returns (dWorkFactory) {
         dWorkFactory newDWorkFactory = new dWorkFactory(
             _functionsRouter,
             _donId,
             GAS_LIMIT,
-            _workVerificationSource
+            _workVerificationSource,
+            priceFeed
         );
         return newDWorkFactory;
     }
