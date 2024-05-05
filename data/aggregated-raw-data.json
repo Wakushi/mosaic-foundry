@@ -1,0 +1,46 @@
+{
+  "client": {
+    "address": "0x35E34708C7361F99041a9b046C72Ea3Fcb29134c",
+    "name": "Gallery Rambault",
+    "email": "gallery-rambault@yopmail.com"
+  },
+  "clientSubmission": {
+    "artist": "Vincent van Gogh",
+    "type": "painting",
+    "clientAddress": "0x35E34708C7361F99041a9b046C72Ea3Fcb29134c",
+    "status": "pending",
+    "title": "Knotberken",
+    "year": 1884,
+    "createdAt": 1714808192000,
+    "approvedAt": 0,
+    "price": 7344500
+  },
+  "marketData": {
+    "title": "Knotberken",
+    "artist": "VINCENT VAN GOGH",
+    "medium": "oil on canvas laid down on panel",
+    "dimensions": "42.8 x 58.6 cm",
+    "firstSaleDate": "1996-06-24 00:00:00",
+    "lastSaleDate": "2021-11-11 00:00:00",
+    "firstSalePrice": 693000,
+    "lastSalePrice": 7344500,
+    "moic": 10.5981240981241,
+    "imageURL": "https://static.masterworks.io/resize/1000/masterworks-research/public-research/price_database/CN20180lot55C.jpg"
+  },
+  "report": {
+    "reportId": "APR2023-0001",
+    "createdAt": 1714708192000,
+    "appraisedAt": 1714808192000,
+    "artist": "Vincent van Gogh",
+    "year": 1884,
+    "work": "Knotberken",
+    "type": "painting",
+    "clientAddress": "0x35E34708C7361F99041a9b046C72Ea3Fcb29134c",
+    "status": "approved",
+    "authenticity": "confirmed",
+    "condition": "excellent",
+    "valuationUSD": 7344500,
+    "lastOwner": "Gallery Rambault",
+    "lastSaledAt": 1636588800000
+  }
+}

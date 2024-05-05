@@ -23,8 +23,5 @@ contract dWorkShare is ERC20 {
         i_sharePrice = _sharePrice;
     }
 
-    function buyShare(uint256 _amount) external payable {
-        
-    }
+    function buyShare(uint256 _amount) external payable {}
 }
-

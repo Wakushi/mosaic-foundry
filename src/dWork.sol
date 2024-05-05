@@ -12,6 +12,10 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 // work json example
 // https://peach-genuine-lamprey-766.mypinata.cloud/ipfs/QmSimNV6bDWiVocmH1xqkQwBeRKDuUWmMP2CNu4tfi2vfK
+// report json example
+// https://peach-genuine-lamprey-766.mypinata.cloud/ipfs/QmPySAgZUaYPxBfHQnToLwNWaFswuYiueUjr7Yy9ERfyhF
+// analytics reponse json mock
+// https://peach-genuine-lamprey-766.mypinata.cloud/ipfs/QmV1jndyEv2AqTuZNAC9jUiKARtA6nLdwXGVh5wiiuTrJd
 
 contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     ///////////////////
@@ -31,13 +35,15 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     ///////////////////
 
     // Chainlink Functions
+    // ---- CONFIG ----
     address s_functionsRouter;
     bytes32 s_donID;
     uint32 s_gasLimit = 300000;
     uint64 s_subscriptionId;
+    string s_workVerificationSource;
+    // ---- STATE ----
     bytes s_lastResponse;
     bytes s_lastError;
-    string s_workVerificationSource;
     bytes32 s_lastRequestId;
 
     mapping(bytes32 requestId => WorkVerificationRequest request)
@@ -45,7 +51,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     string public s_workURI;
     bool public s_isMinted;
-    address public s_gallery;
+    address public s_customer;
     uint256 public s_lastVerifiedAt;
     string public constant BASE_URI =
         "https://peach-genuine-lamprey-766.mypinata.cloud/ipfs/";
@@ -77,20 +83,29 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         _;
     }
 
+    //////////////////
+    // Functions
+    //////////////////
+
     constructor(
+        address _functionsRouter,
         bytes32 _donId,
-        address _gallery,
+        uint32 _gasLimit,
+        string memory _workVerificationSource,
+        address _customer,
         string memory _workName,
         string memory _workSymbol,
-        address _functionsRouter
+        string memory _workURI
     )
         FunctionsClient(_functionsRouter)
         Ownable(msg.sender)
         ERC721(_workName, _workSymbol)
     {
-        s_gallery = _gallery;
         s_donID = _donId;
-        s_functionsRouter = _functionsRouter;
+        s_gasLimit = _gasLimit;
+        s_workVerificationSource = _workVerificationSource;
+        s_customer = _customer;
+        s_workURI = _workURI;
     }
 
     ////////////////////
@@ -101,18 +116,20 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         s_subscriptionId = _subscriptionId;
     }
 
+    /**
+     *
+     * @param _args [customerAddress, workID]
+     * @dev Performs multiple API calls using Chainlink Functions to verify the work
+     */
     function requestWorkVerification(
         string[] calldata _args
     ) external onlyOwner notMinted {
-        // Goal: Verify that the work is original, unique and owned by the gallery
         _sendRequest(_args);
     }
 
     ////////////////////
     // Internal
     ////////////////////
-
-    // Args : [workID, galleryAddress, workURI]
 
     function _sendRequest(
         string[] calldata args
@@ -163,7 +180,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     function _mintWork() internal {
         s_isMinted = true;
-        _safeMint(s_gallery, 0);
+        _safeMint(s_customer, 0);
     }
 
     function _ensureNotMinted() internal view returns (bool) {

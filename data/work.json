@@ -1,0 +1,11 @@
+{
+  "id": 45678,
+  "clientAddress": "0x1234567890abcdef1234567890abcdef12345678",
+  "status": "pending",
+  "createdAt": 1717171717,
+  "approvedAt": 1717171717,
+  "work": "Flower Thrower",
+  "artist": "Banksy",
+  "type": "painting",
+  "year": 2004
+}

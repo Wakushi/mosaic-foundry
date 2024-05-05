@@ -1,0 +1,16 @@
+{
+  "reportId": "APR2023-0001",
+  "createdAt": 1714708192000,
+  "appraisedAt": 1714808192000,
+  "artist": "Vincent van Gogh",
+  "year": 1884,
+  "work": "Knotberken",
+  "type": "painting",
+  "clientAddress": "0x35E34708C7361F99041a9b046C72Ea3Fcb29134c",
+  "status": "approved",
+  "authenticity": "confirmed",
+  "condition": "excellent",
+  "valuationUSD": 7344500,
+  "lastOwner": "Gallery Rambault",
+  "lastSaledAt": 1636588800000
+}

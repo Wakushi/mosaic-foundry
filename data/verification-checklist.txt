@@ -1,0 +1,15 @@
+Data to verify to prove price and ownership
+- Client name (client/report)
+- Ownership (client/report)
+- Artist name (submission/market/report)
+- Work name (submission/market/report)
+- Last price (submission/market/report)
+- Last sale date (market/report)
+- Authenticity (report)
+- Type (submission/report)
+
+Expected final output : 
+- authenticity
+- price
+
+Example : {"authenticity":"confirmed", "price":"7344500"}
