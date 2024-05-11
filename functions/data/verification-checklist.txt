@@ -9,7 +9,6 @@ Data to verify to prove price and ownership
 - Type (submission/report)
 
 Expected final output : 
-- authenticity
 - price
 
-Example : {"authenticity":"confirmed", "price":"7344500"}
+Example : 7344500
