@@ -1,6 +1,5 @@
 const fs = require("fs")
 
-// Loads environment variables from .env.enc file (if it exists)
 require("@chainlink/env-enc").config()
 
 const Location = {
@@ -22,27 +21,20 @@ const ReturnType = {
   Buffer: "Buffer",
 }
 
-// Configure the request by setting the fields below
 const requestConfig = {
-  // Location of source code (only Inline is currently supported)
   codeLocation: Location.Inline,
-  // Code language (only JavaScript is currently supported)
   codeLanguage: CodeLanguage.JavaScript,
-  // String containing the source code to be executed
-  //source: fs.readFileSync("./Functions-source-getNftMetadata.js").toString(),
-  source: fs.readFileSync("./Functions-ethers-example.js").toString(),
-
-  // Secrets can be accessed within the source code with `secrets.varName` (ie: secrets.apiKey). The secrets object can only contain string values.
-  secrets: {},
-  // Per-node secrets objects assigned to each DON member. When using per-node secrets, nodes can only use secrets which they have been assigned.
+  source: fs.readFileSync("./sources/work-verification-source.js").toString(),
+  secrets: {
+    openaiApiKey: process.env["OPENAI_API_KEY"],
+  },
   perNodeSecrets: [],
-  // ETH wallet key used to sign secrets so they cannot be accessed by a 3rd party
   walletPrivateKey: process.env["PRIVATE_KEY"],
-  // Args (string only array) can be accessed within the source code with `args[index]` (ie: args[0]).
-  args: ["0"], // sportId, gameId
-  // Expected type of the returned value
+  args: [
+    "Qmbi73JQdBVuLYUMDamKS3Z42uQf54MP1L2WFxKLUCmJuk", // CUSTOMER SUBMISSION HASH
+    "QmUCMNYFoJAoaX21CeVBChvwXUqbXPSEBouAGci283Bi1d", // REPORT HASH
+  ],
   expectedReturnType: ReturnType.bytes,
-  // Redundant URLs which point to encrypted off-chain secrets
   secretsURLs: [],
 }
 
