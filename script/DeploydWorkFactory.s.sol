@@ -35,14 +35,16 @@ contract DeployDWorkFactory is Script {
             address priceFeed
         ) = helperConfig.activeNetworkConfig();
 
+        string memory verificationSource = vm.readFile(workVerificationSource);
         if (
             functionsRouter == address(0) ||
             donId == bytes32(0) ||
-            priceFeed == address(0)
+            priceFeed == address(0) ||
+            bytes(verificationSource).length == 0
         ) {
             revert("something is wrong");
         }
-        string memory verificationSource = vm.readFile(workVerificationSource);
+
         return
             IGetDWorkFactoryReturnTypes.GetDWorkFactoryReturnType(
                 functionsRouter,

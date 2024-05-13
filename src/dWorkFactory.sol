@@ -123,4 +123,20 @@ contract dWorkFactory is Ownable {
     ) external view returns (address) {
         return s_workShares[_workContract];
     }
+
+    function getFunctionsRouter() external view returns (address) {
+        return s_functionsRouter;
+    }
+
+    function getDonID() external view returns (bytes32) {
+        return s_donID;
+    }
+
+    function getWorkVerificationSource() external view returns (string memory) {
+        return s_workVerificationSource;
+    }
+
+    function getPriceFeed() external view returns (address) {
+        return s_priceFeed;
+    }
 }

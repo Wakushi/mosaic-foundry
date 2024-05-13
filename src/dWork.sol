@@ -29,7 +29,6 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     ///////////////////
 
     // Chainlink Functions
-    address s_functionsRouter;
     bytes32 s_donID;
     uint32 s_gasLimit = 300000;
     uint64 s_subscriptionId;
@@ -249,5 +248,45 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     function getLastVerifiedAt() external view returns (uint256) {
         return s_lastVerifiedAt;
+    }
+
+    function getOwnerName() external view returns (string memory) {
+        return s_ownerName;
+    }
+
+    function getDonId() external view returns (bytes32) {
+        return s_donID;
+    }
+
+    function getGasLimit() external view returns (uint32) {
+        return s_gasLimit;
+    }
+
+    function getWorkVerificationSource() external view returns (string memory) {
+        return s_workVerificationSource;
+    }
+
+    function getSecretReference() external view returns (bytes memory) {
+        return s_secretReference;
+    }
+
+    function getLastResponse() external view returns (bytes memory) {
+        return s_lastResponse;
+    }
+
+    function getLastError() external view returns (bytes memory) {
+        return s_lastError;
+    }
+
+    function getLastRequestId() external view returns (bytes32) {
+        return s_lastRequestId;
+    }
+
+    function getFactoryAddress() external view returns (address) {
+        return i_factoryAddress;
+    }
+
+    function getBaseURI() external pure returns (string memory) {
+        return BASE_URI;
     }
 }
