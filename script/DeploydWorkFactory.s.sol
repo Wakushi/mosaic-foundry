@@ -7,9 +7,8 @@ import {dWorkFactory} from "../src/dWorkFactory.sol";
 import {IGetDWorkFactoryReturnTypes} from "../src/interfaces/IGetDWorkFactoryReturnTypes.sol";
 
 contract DeployDWorkFactory is Script {
-    string constant externalWorkVerificationSource =
-        "./functions/sources/workVerification.js";
-    uint32 constant GAS_LIMIT = 300000;
+    string constant workVerificationSource =
+        "./functions/sources/work-verification-source.js";
 
     function run() external {
         IGetDWorkFactoryReturnTypes.GetDWorkFactoryReturnType
@@ -43,14 +42,12 @@ contract DeployDWorkFactory is Script {
         ) {
             revert("something is wrong");
         }
-        string memory workVerificationSource = vm.readFile(
-            externalWorkVerificationSource
-        );
+        string memory verificationSource = vm.readFile(workVerificationSource);
         return
             IGetDWorkFactoryReturnTypes.GetDWorkFactoryReturnType(
                 functionsRouter,
                 donId,
-                workVerificationSource,
+                verificationSource,
                 priceFeed
             );
     }
@@ -64,7 +61,6 @@ contract DeployDWorkFactory is Script {
         dWorkFactory newDWorkFactory = new dWorkFactory(
             _functionsRouter,
             _donId,
-            GAS_LIMIT,
             _workVerificationSource,
             priceFeed
         );

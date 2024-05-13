@@ -186,27 +186,9 @@ const discrepancies = getDiscrepancies(sanitizedData)
 if (discrepancies.length > 0) {
   throw new Error(JSON.stringify(discrepancies))
 } else {
-  console.log("sanitizedData: ", sanitizedData)
   const encoded = abiCoder.encode(
     ["string", "uint256"],
     [sanitizedData.customerAndOwnerName[0], sanitizedData.price[0]]
   )
   return ethers.getBytes(encoded)
 }
-
-// Example output:
-// bytes response: 0x00000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000701174000000000000000000000000000000000000000000000000000000000000001047616c6c6572792052616d6261756c7400000000000000000000000000000000
-// error:  undefined
-// Output:  sanitizedData:  {
-//   artist: [ "Vincent van Gogh", "Vincent van Gogh", "VINCENT VAN GOGH" ],
-//   title: [ "Knotberken", "Knotberken", "Knotberken" ],
-//   price: [ 7344500, 7344500, 7344500 ],
-//   customerAndOwnerName: [ "Gallery Rambault", "Gallery Rambault" ]
-// }
-
-// const organizedData = {
-//   artist: ["Vincent van Gogh", "Vincent van Gogh", "VINCENT VAN GOGH"],
-//   title: ["Knotberken", "Knotberken", "Knotberken"],
-//   price: [73445500, 7344500, 7344500],
-//   customerAndOwnerName: ["Gallery Rambault", "Gallery Rambault"],
-// }

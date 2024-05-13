@@ -19,7 +19,8 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     using OracleLib for AggregatorV3Interface;
 
     struct WorkVerificationRequest {
-        string workID;
+        string customerSubmissionHash;
+        string appraiserReportHash;
         uint256 requestAt;
     }
 
@@ -32,6 +33,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     bytes32 s_donID;
     uint32 s_gasLimit = 300000;
     uint64 s_subscriptionId;
+    bytes public s_secretReference;
     string s_workVerificationSource;
     bytes s_lastResponse;
     bytes s_lastError;
@@ -46,6 +48,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     // Work
     uint256 s_workPriceUsd;
     string s_workURI;
+    string s_ownerName;
     bool s_isMinted;
     bool s_isFractionalized;
     address s_customer;
@@ -84,6 +87,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     //////////////////
 
     constructor(
+        address _initialOwner,
         address _functionsRouter,
         bytes32 _donId,
         uint32 _gasLimit,
@@ -95,7 +99,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         address _factoryAddress
     )
         FunctionsClient(_functionsRouter)
-        Ownable(msg.sender)
+        Ownable(_initialOwner)
         ERC721(_workName, _workSymbol)
     {
         s_donID = _donId;
@@ -112,13 +116,13 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     /**
      *
-     * @param _args [customerAddress, workID]
+     * @param _args [CUSTOMER SUBMISSION IPFS HASH, APPRAISER REPORT IPFS HASH]
      * @dev Performs multiple API calls using Chainlink Functions to verify the work
      */
     function requestWorkVerification(
         string[] calldata _args
     ) external onlyOwner notMinted {
-        _sendRequest(_args);
+        _sendWorkVerificationRequest(_args);
     }
 
     function setIsFractionalized(bool _isFractionalized) external {
@@ -130,15 +134,27 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         s_subscriptionId = _subscriptionId;
     }
 
+    function setDonId(bytes32 _newDonId) external onlyOwner {
+        s_donID = _newDonId;
+    }
+
+    function setSecretReference(
+        bytes calldata _secretReference
+    ) external onlyOwner {
+        s_secretReference = _secretReference;
+    }
+
     ////////////////////
     // Internal
     ////////////////////
 
-    function _sendRequest(
+    function _sendWorkVerificationRequest(
         string[] calldata args
     ) internal returns (bytes32 requestId) {
         FunctionsRequest.Request memory req;
         req.initializeRequestForInlineJavaScript(s_workVerificationSource);
+        req.secretsLocation = FunctionsRequest.Location.DONHosted;
+        req.encryptedSecretsReference = s_secretReference;
         if (args.length > 0) {
             req.setArgs(args);
         }
@@ -152,6 +168,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
         s_requestIdToRequest[s_lastRequestId] = WorkVerificationRequest(
             args[0],
+            args[1],
             block.timestamp
         );
         return s_lastRequestId;
@@ -174,16 +191,23 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         }
 
         s_lastResponse = response;
-        uint256 workPrice = uint256(bytes32(response));
+        (string memory ownerName, uint256 priceUsd) = abi.decode(
+            response,
+            (string, uint256)
+        );
 
-        if (workPrice > 0) {
-            _mintWork();
-            s_workPriceUsd = workPrice;
+        if (priceUsd == 0) {
+            s_lastError = err;
+            emit Response(requestId, priceUsd, s_lastResponse, s_lastError);
+            return;
         }
 
-        s_lastError = err;
+        s_ownerName = ownerName;
+        s_lastVerifiedAt = block.timestamp;
+        s_workPriceUsd = priceUsd;
+        _mintWork();
 
-        emit Response(requestId, workPrice, s_lastResponse, s_lastError);
+        emit Response(requestId, priceUsd, s_lastResponse, s_lastError);
     }
 
     function _mintWork() internal {

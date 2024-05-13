@@ -4,6 +4,19 @@ out = "out"
 libs = ["lib"]
 remappings = ["@openzeppelin=lib/openzeppelin-contracts", "@chainlink=lib/chainlink", "@solmate/=lib/solmate/src/"]
 ffi = true
+fs_permissions = [{ access = "read", path = "./" }]
 evm_version = 'paris'
+
+[etherscan]
+base = { key = "${BASE_ETHERSCAN_API_KEY}" }
+polygon = { key = "${POLYGONSCAN_API_KEY}" }
+sepolia = { key = "${ETHERSCAN_API_KEY}" }
+amoy = { key = "${POLYGONSCAN_API_KEY}" }
+
+[rpc_endpoints]
+polygon = "${POLYGON_RPC_URL}"
+sepolia = "${SEPOLIA_RPC_URL}"
+amoy = "${POLYGON_AMOY_RPC_URL}"
+
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

@@ -60,7 +60,7 @@ ifeq ($(findstring --network fuji,$(ARGS)),--network fuji)
 endif
 
 deploy:
-	TO-DO
+	@forge script script/DeployDWorkFactory.s.sol:DeployDWorkFactory $(NETWORK_ARGS)
 
 createSubscription:
 	@forge script script/Interactions.s.sol:CreateSubscription $(NETWORK_ARGS)
