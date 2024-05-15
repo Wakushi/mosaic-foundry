@@ -5,7 +5,8 @@ pragma solidity ^0.8.19;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {dWork} from "./dWork.sol";
 import {dWorkShare} from "./dWorkShare.sol";
-import {IDWork} from "./interfaces/IDWork.sol";
+import {IDWork} from "./interfaces/IdWork.sol";
+import {IDWorkConfig} from "./interfaces/IDWorkConfig.sol";
 
 contract dWorkFactory is Ownable {
     ///////////////////
@@ -14,7 +15,9 @@ contract dWorkFactory is Ownable {
 
     address s_functionsRouter;
     bytes32 s_donID;
+    uint64 s_functionsSubId;
     uint32 constant GAS_LIMIT = 300000;
+    bytes s_secretReference;
     string s_workVerificationSource;
     string s_certificateExtractionSource;
     address s_priceFeed;
@@ -40,12 +43,14 @@ contract dWorkFactory is Ownable {
     constructor(
         address _functionsRouter,
         bytes32 _donId,
+        uint64 _functionsSubId,
         string memory _workVerificationSource,
         string memory _certificateExtractionSource,
         address _priceFeed
     ) Ownable(msg.sender) {
         s_functionsRouter = _functionsRouter;
         s_donID = _donId;
+        s_functionsSubId = _functionsSubId;
         s_workVerificationSource = _workVerificationSource;
         s_certificateExtractionSource = _certificateExtractionSource;
         s_priceFeed = _priceFeed;
@@ -61,19 +66,22 @@ contract dWorkFactory is Ownable {
         string memory _workSymbol,
         string memory _workURI
     ) external onlyOwner returns (address) {
-        dWork newWork = new dWork(
-            msg.sender,
-            s_functionsRouter,
-            s_donID,
-            GAS_LIMIT,
-            s_workVerificationSource,
-            s_certificateExtractionSource,
-            _customer,
-            _workName,
-            _workSymbol,
-            _workURI,
-            address(this)
-        );
+        IDWorkConfig.dWorkConfig memory workConfig = IDWorkConfig.dWorkConfig({
+            initialOwner: owner(),
+            donId: s_donID,
+            functionsRouter: s_functionsRouter,
+            functionsSubId: s_functionsSubId,
+            gasLimit: GAS_LIMIT,
+            secretReference: s_secretReference,
+            workVerificationSource: s_workVerificationSource,
+            certificateExtractionSource: s_certificateExtractionSource,
+            customer: _customer,
+            workName: _workName,
+            workSymbol: _workSymbol,
+            workURI: _workURI,
+            factoryAddress: address(this)
+        });
+        dWork newWork = new dWork(workConfig);
         address newWorkAddress = address(newWork);
         s_customerWorks[_customer].push(newWorkAddress);
         emit WorkDeployed(newWorkAddress, _customer);

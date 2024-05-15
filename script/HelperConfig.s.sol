@@ -11,6 +11,7 @@ contract HelperConfig is Script {
         bytes32 donId;
         address functionsRouter;
         address priceFeed;
+        uint64 functionsSubId;
     }
 
     uint256 public constant DEFAULT_ANVIL_KEY =
@@ -29,21 +30,23 @@ contract HelperConfig is Script {
         }
     }
 
-    function getPolygonAmoyConfig() public view returns (NetworkConfig memory) {
+    function getPolygonAmoyConfig() public pure returns (NetworkConfig memory) {
         return
             NetworkConfig({
                 donId: bytes32("fun-polygon-amoy-1"),
                 functionsRouter: 0xC22a79eBA640940ABB6dF0f7982cc119578E11De,
-                priceFeed: 0xF0d50568e3A7e8259E16663972b11910F89BD8e7
+                priceFeed: 0xF0d50568e3A7e8259E16663972b11910F89BD8e7,
+                functionsSubId: 41
             });
     }
 
-    function getBaseSepoliaConfig() public view returns (NetworkConfig memory) {
+    function getBaseSepoliaConfig() public pure returns (NetworkConfig memory) {
         return
             NetworkConfig({
                 donId: bytes32("fun-base-sepolia-1"),
                 functionsRouter: 0xf9B8fc078197181C841c296C876945aaa425B278,
-                priceFeed: 0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1
+                priceFeed: 0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1,
+                functionsSubId: 42
             });
     }
 
@@ -52,15 +55,15 @@ contract HelperConfig is Script {
             return activeNetworkConfig;
         }
 
-        uint96 baseFee = 0.25 ether; // 0.25 LINK
-        uint96 gasPriceLink = 1e9; // 1 gwei LINK
+        // uint96 baseFee = 0.25 ether; // 0.25 LINK
+        // uint96 gasPriceLink = 1e9; // 1 gwei LINK
 
         vm.startBroadcast();
-        VRFCoordinatorV2Mock vrfCoordinatorMock = new VRFCoordinatorV2Mock(
-            baseFee,
-            gasPriceLink
-        );
-        LinkToken link = new LinkToken();
+        // VRFCoordinatorV2Mock vrfCoordinatorMock = new VRFCoordinatorV2Mock(
+        //     baseFee,
+        //     gasPriceLink
+        // );
+        // LinkToken link = new LinkToken();
         MockV3Aggregator mockPriceFeed = new MockV3Aggregator(
             DECIMALS,
             INITIAL_PRICE
@@ -71,7 +74,8 @@ contract HelperConfig is Script {
             NetworkConfig({
                 donId: bytes32("fun-ethereum-sepolia-1"),
                 functionsRouter: 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419,
-                priceFeed: address(mockPriceFeed)
+                priceFeed: address(mockPriceFeed),
+                functionsSubId: 0
             });
     }
 }

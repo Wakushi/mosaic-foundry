@@ -20,6 +20,7 @@ contract DeployDWorkFactory is Script {
         deployDWorkFactory(
             dWorkFactoryReturnType.functionsRouter,
             dWorkFactoryReturnType.donId,
+            dWorkFactoryReturnType.functionsSubId,
             dWorkFactoryReturnType.workVerificationSource,
             dWorkFactoryReturnType.certificateExtractionSource,
             dWorkFactoryReturnType.priceFeed
@@ -35,7 +36,8 @@ contract DeployDWorkFactory is Script {
         (
             bytes32 donId,
             address functionsRouter,
-            address priceFeed
+            address priceFeed,
+            uint64 functionsSubId
         ) = helperConfig.activeNetworkConfig();
 
         string memory verificationSource = vm.readFile(workVerificationSource);
@@ -55,6 +57,7 @@ contract DeployDWorkFactory is Script {
             IGetDWorkFactoryReturnTypes.GetDWorkFactoryReturnType(
                 functionsRouter,
                 donId,
+                functionsSubId,
                 verificationSource,
                 certificateSource,
                 priceFeed
@@ -64,6 +67,7 @@ contract DeployDWorkFactory is Script {
     function deployDWorkFactory(
         address _functionsRouter,
         bytes32 _donId,
+        uint64 _functionsSubId,
         string memory _workVerificationSource,
         string memory _certificateExtractionSource,
         address priceFeed
@@ -71,6 +75,7 @@ contract DeployDWorkFactory is Script {
         dWorkFactory newDWorkFactory = new dWorkFactory(
             _functionsRouter,
             _donId,
+            _functionsSubId,
             _workVerificationSource,
             _certificateExtractionSource,
             priceFeed

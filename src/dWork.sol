@@ -9,6 +9,7 @@ import {FunctionsRequest} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/l
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {OracleLib, AggregatorV3Interface} from "./libraries/OracleLib.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {IDWorkConfig} from "./interfaces/IDWorkConfig.sol";
 
 contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     ///////////////////
@@ -45,28 +46,32 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     // Chainlink Functions
     bytes32 s_donID;
     uint32 s_gasLimit = 300000;
-    uint64 s_subscriptionId;
+    uint64 s_functionsSubId;
     bytes public s_secretReference;
+
     string s_workVerificationSource;
     string s_certificateExtractionSource;
+
     bytes s_lastResponse;
     bytes s_lastError;
     bytes32 s_lastRequestId;
 
     mapping(bytes32 requestId => WorkCFRequest request) private s_requestById;
+
     address immutable i_factoryAddress;
     string constant BASE_URI =
         "https://peach-genuine-lamprey-766.mypinata.cloud/ipfs/";
 
     // Work
-    uint256 s_workPriceUsd;
+    WorkCertificate s_certificate;
     string s_workURI;
     string s_ownerName;
+    uint256 s_workPriceUsd;
+    address s_customer;
+
     bool s_isMinted;
     bool s_isFractionalized;
-    address s_customer;
     uint256 s_lastVerifiedAt;
-    WorkCertificate s_certificate;
 
     ///////////////////
     // Events
@@ -101,29 +106,21 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     //////////////////
 
     constructor(
-        address _initialOwner,
-        address _functionsRouter,
-        bytes32 _donId,
-        uint32 _gasLimit,
-        string memory _workVerificationSource,
-        string memory _certificateExtractionSource,
-        address _customer,
-        string memory _workName,
-        string memory _workSymbol,
-        string memory _workURI,
-        address _factoryAddress
+        IDWorkConfig.dWorkConfig memory _config
     )
-        FunctionsClient(_functionsRouter)
-        Ownable(_initialOwner)
-        ERC721(_workName, _workSymbol)
+        FunctionsClient(_config.functionsRouter)
+        Ownable(_config.initialOwner)
+        ERC721(_config.workName, _config.workSymbol)
     {
-        s_donID = _donId;
-        s_gasLimit = _gasLimit;
-        s_workVerificationSource = _workVerificationSource;
-        s_certificateExtractionSource = _certificateExtractionSource;
-        s_customer = _customer;
-        s_workURI = _workURI;
-        i_factoryAddress = _factoryAddress;
+        s_donID = _config.donId;
+        s_functionsSubId = _config.functionsSubId;
+        s_gasLimit = _config.gasLimit;
+        s_secretReference = _config.secretReference;
+        s_workVerificationSource = _config.workVerificationSource;
+        s_certificateExtractionSource = _config.certificateExtractionSource;
+        s_customer = _config.customer;
+        s_workURI = _config.workURI;
+        i_factoryAddress = _config.factoryAddress;
     }
 
     ////////////////////
@@ -158,7 +155,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     }
 
     function setCFSubId(uint64 _subscriptionId) external onlyOwner {
-        s_subscriptionId = _subscriptionId;
+        s_functionsSubId = _subscriptionId;
     }
 
     function setDonId(bytes32 _newDonId) external onlyOwner {
@@ -220,7 +217,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
         s_lastRequestId = _sendRequest(
             req.encodeCBOR(),
-            s_subscriptionId,
+            s_functionsSubId,
             s_gasLimit,
             s_donID
         );
