@@ -31,6 +31,8 @@ function getSourceConfig(source) {
         args: [
           "Qmbi73JQdBVuLYUMDamKS3Z42uQf54MP1L2WFxKLUCmJuk", // CUSTOMER SUBMISSION HASH
           "QmUCMNYFoJAoaX21CeVBChvwXUqbXPSEBouAGci283Bi1d", // REPORT HASH
+          "Vincent van Gogh", // CERTIFICATE ARTIST
+          "Knotberken", // CERTIFICATE WORK TITLE
         ],
       }
     case "certificate-extraction":
@@ -50,12 +52,14 @@ function getSourceConfig(source) {
         args: [
           "Qmbi73JQdBVuLYUMDamKS3Z42uQf54MP1L2WFxKLUCmJuk", // CUSTOMER SUBMISSION HASH
           "QmUCMNYFoJAoaX21CeVBChvwXUqbXPSEBouAGci283Bi1d", // REPORT HASH
+          "Vincent van Gogh", // CERTIFICATE ARTIST
+          "Knotberken", // CERTIFICATE WORK TITLE
         ],
       }
   }
 }
 
-const activeConfig = getSourceConfig("certificate-extraction")
+const activeConfig = getSourceConfig("work-verification")
 
 const requestConfig = {
   codeLocation: Location.Inline,

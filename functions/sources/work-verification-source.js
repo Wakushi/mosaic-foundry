@@ -165,6 +165,8 @@ function getDiscrepancies(organizedData) {
 ///////////////////////// MAIN /////////////////////////
 const customerSubmissionHash = args[0]
 const reportHash = args[1]
+const certificateArtist = args[2]
+const certificateWorkTitle = args[3]
 
 if (!secrets.openaiApiKey) {
   throw new Error("OpenAI API key is required")
@@ -176,11 +178,16 @@ const aggregatedData = await aggregateWorkData(
 )
 
 const organizedData = await organizeData(aggregatedData)
-const sanitizedData = {}
+const sanitizedData = {} // { "artist": [], "title": [], "price": [], "customerAndOwnerName": [] }
+
 Object.entries(JSON.parse(organizedData)).forEach(([key, collection]) => {
   collection = collection.filter((value) => value)
   sanitizedData[key] = collection
 })
+
+sanitizedData.artist.push(certificateArtist)
+sanitizedData.title.push(certificateWorkTitle)
+
 const discrepancies = getDiscrepancies(sanitizedData)
 
 if (discrepancies.length > 0) {
