@@ -18,10 +18,24 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     using FunctionsRequest for FunctionsRequest.Request;
     using OracleLib for AggregatorV3Interface;
 
-    struct WorkVerificationRequest {
+    enum WorkCFRequestType {
+        WorkVerification,
+        CertificateExtraction
+    }
+
+    struct WorkCertificate {
+        string artist;
+        string work;
+        uint256 year;
+        string imageURL;
+    }
+
+    struct WorkCFRequest {
+        WorkCFRequestType requestType;
         string customerSubmissionHash;
         string appraiserReportHash;
-        uint256 requestAt;
+        string certificateImageHash;
+        uint256 timestamp;
     }
 
     ///////////////////
@@ -34,12 +48,12 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     uint64 s_subscriptionId;
     bytes public s_secretReference;
     string s_workVerificationSource;
+    string s_certificateExtractionSource;
     bytes s_lastResponse;
     bytes s_lastError;
     bytes32 s_lastRequestId;
 
-    mapping(bytes32 requestId => WorkVerificationRequest request)
-        private s_requestIdToRequest;
+    mapping(bytes32 requestId => WorkCFRequest request) private s_requestById;
     address immutable i_factoryAddress;
     string constant BASE_URI =
         "https://peach-genuine-lamprey-766.mypinata.cloud/ipfs/";
@@ -52,6 +66,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     bool s_isFractionalized;
     address s_customer;
     uint256 s_lastVerifiedAt;
+    WorkCertificate s_certificate;
 
     ///////////////////
     // Events
@@ -91,6 +106,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         bytes32 _donId,
         uint32 _gasLimit,
         string memory _workVerificationSource,
+        string memory _certificateExtractionSource,
         address _customer,
         string memory _workName,
         string memory _workSymbol,
@@ -104,6 +120,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         s_donID = _donId;
         s_gasLimit = _gasLimit;
         s_workVerificationSource = _workVerificationSource;
+        s_certificateExtractionSource = _certificateExtractionSource;
         s_customer = _customer;
         s_workURI = _workURI;
         i_factoryAddress = _factoryAddress;
@@ -122,6 +139,17 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         string[] calldata _args
     ) external onlyOwner notMinted {
         _sendWorkVerificationRequest(_args);
+    }
+
+    /**
+     *
+     * @param _args [CERTIFICATE IMAGE IPFS HASH]
+     * @dev Performs multiple API calls using Chainlink Functions to extract the certificate data
+     */
+    function requestCertificateExtraction(
+        string[] calldata _args
+    ) external onlyOwner notMinted {
+        _sendCertificateExtractionRequest(_args);
     }
 
     function setIsFractionalized(bool _isFractionalized) external {
@@ -148,10 +176,42 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     ////////////////////
 
     function _sendWorkVerificationRequest(
-        string[] calldata args
+        string[] calldata _args
+    ) internal returns (bytes32 requestId) {
+        s_lastRequestId = _generateSendRequest(_args, s_workVerificationSource);
+        s_requestById[s_lastRequestId] = WorkCFRequest(
+            WorkCFRequestType.WorkVerification,
+            _args[0],
+            _args[1],
+            "",
+            block.timestamp
+        );
+        return s_lastRequestId;
+    }
+
+    function _sendCertificateExtractionRequest(
+        string[] calldata _args
+    ) internal returns (bytes32 requestId) {
+        s_lastRequestId = _generateSendRequest(
+            _args,
+            s_certificateExtractionSource
+        );
+        s_requestById[s_lastRequestId] = WorkCFRequest(
+            WorkCFRequestType.CertificateExtraction,
+            "",
+            "",
+            _args[0],
+            block.timestamp
+        );
+        return s_lastRequestId;
+    }
+
+    function _generateSendRequest(
+        string[] calldata args,
+        string memory source
     ) internal returns (bytes32 requestId) {
         FunctionsRequest.Request memory req;
-        req.initializeRequestForInlineJavaScript(s_workVerificationSource);
+        req.initializeRequestForInlineJavaScript(source);
         req.secretsLocation = FunctionsRequest.Location.DONHosted;
         req.encryptedSecretsReference = s_secretReference;
         if (args.length > 0) {
@@ -165,11 +225,6 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
             s_donID
         );
 
-        s_requestIdToRequest[s_lastRequestId] = WorkVerificationRequest(
-            args[0],
-            args[1],
-            block.timestamp
-        );
         return s_lastRequestId;
     }
 
@@ -189,7 +244,27 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
             revert dWork__UnexpectedRequestID(requestId);
         }
 
+        WorkCFRequest storage request = s_requestById[requestId];
+
+        if (request.requestType == WorkCFRequestType.WorkVerification) {
+            _fulfillWorkVerificationRequest(requestId, response, err);
+        } else {
+            _fulfillCertificateExtractionRequest(
+                requestId,
+                response,
+                err,
+                request.certificateImageHash
+            );
+        }
+
         s_lastResponse = response;
+    }
+
+    function _fulfillWorkVerificationRequest(
+        bytes32 requestId,
+        bytes memory response,
+        bytes memory err
+    ) internal {
         (string memory ownerName, uint256 priceUsd) = abi.decode(
             response,
             (string, uint256)
@@ -207,6 +282,32 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         _mintWork();
 
         emit Response(requestId, priceUsd, s_lastResponse, s_lastError);
+    }
+
+    function _fulfillCertificateExtractionRequest(
+        bytes32 requestId,
+        bytes memory response,
+        bytes memory err,
+        string memory certificateImageHash
+    ) internal {
+        (string memory artist, string memory work, uint256 year) = abi.decode(
+            response,
+            (string, string, uint256)
+        );
+
+        if (bytes(artist).length == 0 || bytes(work).length == 0 || year == 0) {
+            s_lastError = err;
+            emit Response(requestId, 0, s_lastResponse, s_lastError);
+            return;
+        }
+
+        s_certificate = WorkCertificate(
+            artist,
+            work,
+            year,
+            certificateImageHash
+        );
+        emit Response(requestId, 0, s_lastResponse, s_lastError);
     }
 
     function _mintWork() internal {
@@ -288,5 +389,9 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     function getBaseURI() external pure returns (string memory) {
         return BASE_URI;
+    }
+
+    function getCertificate() external view returns (WorkCertificate memory) {
+        return s_certificate;
     }
 }

@@ -9,6 +9,8 @@ import {IGetDWorkFactoryReturnTypes} from "../src/interfaces/IGetDWorkFactoryRet
 contract DeployDWorkFactory is Script {
     string constant workVerificationSource =
         "./functions/sources/work-verification-source.js";
+    string constant certificateExtractionSource =
+        "./functions/sources/certificate-extraction-source.js";
 
     function run() external {
         IGetDWorkFactoryReturnTypes.GetDWorkFactoryReturnType
@@ -19,6 +21,7 @@ contract DeployDWorkFactory is Script {
             dWorkFactoryReturnType.functionsRouter,
             dWorkFactoryReturnType.donId,
             dWorkFactoryReturnType.workVerificationSource,
+            dWorkFactoryReturnType.certificateExtractionSource,
             dWorkFactoryReturnType.priceFeed
         );
         vm.stopBroadcast();
@@ -36,6 +39,9 @@ contract DeployDWorkFactory is Script {
         ) = helperConfig.activeNetworkConfig();
 
         string memory verificationSource = vm.readFile(workVerificationSource);
+        string memory certificateSource = vm.readFile(
+            certificateExtractionSource
+        );
         if (
             functionsRouter == address(0) ||
             donId == bytes32(0) ||
@@ -50,6 +56,7 @@ contract DeployDWorkFactory is Script {
                 functionsRouter,
                 donId,
                 verificationSource,
+                certificateSource,
                 priceFeed
             );
     }
@@ -58,12 +65,14 @@ contract DeployDWorkFactory is Script {
         address _functionsRouter,
         bytes32 _donId,
         string memory _workVerificationSource,
+        string memory _certificateExtractionSource,
         address priceFeed
     ) public returns (dWorkFactory) {
         dWorkFactory newDWorkFactory = new dWorkFactory(
             _functionsRouter,
             _donId,
             _workVerificationSource,
+            _certificateExtractionSource,
             priceFeed
         );
         return newDWorkFactory;

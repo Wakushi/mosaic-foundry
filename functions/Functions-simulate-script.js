@@ -10,5 +10,4 @@ async function main() {
   console.log("Output: ", capturedTerminalOutput)
 }
 
-// node Functions-simulate-script.js
 main()

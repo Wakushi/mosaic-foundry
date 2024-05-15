@@ -56,7 +56,7 @@ contract dWorkShare is ERC20, Ownable {
         s_priceFeed = AggregatorV3Interface(_priceFeed);
     }
 
-    function buyShare(uint256 _shareAmount) external payable {
+    function buyInitialShare(uint256 _shareAmount) external payable {
         if (s_totalShareBought + _shareAmount > i_maxShareSupply) {
             revert dWorkShare__InitialSaleClosed();
         }

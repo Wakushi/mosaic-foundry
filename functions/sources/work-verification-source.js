@@ -94,7 +94,6 @@ async function fetchReport(reportHash) {
 }
 
 async function aggregateWorkData(workHash, reportHash) {
-  // const customer = await fetchCustomer(customerHash)
   const customerSubmission = await fetchCustomerWork(workHash)
   const marketData = await fetchWorkMarketData(customerSubmission)
   const report = await fetchReport(reportHash)
@@ -121,8 +120,9 @@ async function organizeData(aggregatedData) {
       Authorization: `Bearer ${secrets.openaiApiKey}`,
     },
     data: {
-      model: "gpt-4-turbo",
+      model: "gpt-4o",
       response_format: { type: "json_object" },
+      seed: 7,
       messages: [
         {
           role: "system",

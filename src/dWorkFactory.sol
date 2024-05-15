@@ -16,6 +16,7 @@ contract dWorkFactory is Ownable {
     bytes32 s_donID;
     uint32 constant GAS_LIMIT = 300000;
     string s_workVerificationSource;
+    string s_certificateExtractionSource;
     address s_priceFeed;
 
     mapping(address customer => address[] works) s_customerWorks;
@@ -40,13 +41,19 @@ contract dWorkFactory is Ownable {
         address _functionsRouter,
         bytes32 _donId,
         string memory _workVerificationSource,
+        string memory _certificateExtractionSource,
         address _priceFeed
     ) Ownable(msg.sender) {
         s_functionsRouter = _functionsRouter;
         s_donID = _donId;
         s_workVerificationSource = _workVerificationSource;
+        s_certificateExtractionSource = _certificateExtractionSource;
         s_priceFeed = _priceFeed;
     }
+
+    //////////////////
+    // External / Public
+    ///////////////////
 
     function deployWork(
         address _customer,
@@ -60,6 +67,7 @@ contract dWorkFactory is Ownable {
             s_donID,
             GAS_LIMIT,
             s_workVerificationSource,
+            s_certificateExtractionSource,
             _customer,
             _workName,
             _workSymbol,
@@ -111,6 +119,10 @@ contract dWorkFactory is Ownable {
         emit WorkSharesDeployed(newWorkSharesAddress, _workContract);
         return newWorkSharesAddress;
     }
+
+    //////////////////
+    // External View
+    ///////////////////
 
     function getCustomerWorks(
         address _customer
