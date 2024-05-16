@@ -14,7 +14,6 @@ interface IDWorkConfig {
         address customer;
         string workName;
         string workSymbol;
-        string workURI;
         address factoryAddress;
     }
 }

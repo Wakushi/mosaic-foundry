@@ -47,6 +47,14 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         uint256 timestamp;
     }
 
+    struct TokenizedWork {
+        string artist;
+        string work;
+        string ownerName;
+        uint256 workPriceUsd;
+        uint256 lastVerifiedAt;
+    }
+
     ///////////////////
     // State variables
     ///////////////////
@@ -66,30 +74,29 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     mapping(bytes32 requestId => WorkCFRequest request) private s_requestById;
 
-    address immutable i_factoryAddress;
-    string constant BASE_URI =
-        "https://peach-genuine-lamprey-766.mypinata.cloud/ipfs/";
+    // Work state
+    address immutable i_workFactoryAddress;
 
-    // Work
     VerificationStep s_verificationStep;
     WorkCertificate s_certificate;
-
-    string s_workURI;
-    string s_ownerName;
-    uint256 s_workPriceUsd;
-    address s_customer;
+    TokenizedWork s_tokenizedWork;
 
     bool s_isMinted;
     bool s_isFractionalized;
-    uint256 s_lastVerifiedAt;
+
+    address s_customer;
 
     ///////////////////
     // Events
     ///////////////////
 
-    event Response(
+    event WorkFractionalized(bool isFractionalized);
+    event ChainlinkRequestSent(bytes32 requestId);
+    event VerificationProcess(VerificationStep step);
+    event CertificateExtracted(WorkCertificate certificate);
+    event WorkTokenized(TokenizedWork tokenizedWork);
+    event ChainlinkResponse(
         bytes32 indexed requestId,
-        uint256 workPrice,
         bytes response,
         bytes err
     );
@@ -135,8 +142,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         s_workVerificationSource = _config.workVerificationSource;
         s_certificateExtractionSource = _config.certificateExtractionSource;
         s_customer = _config.customer;
-        s_workURI = _config.workURI;
-        i_factoryAddress = _config.factoryAddress;
+        i_workFactoryAddress = _config.factoryAddress;
         s_verificationStep = VerificationStep.Pending;
     }
 
@@ -176,6 +182,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         bool _isFractionalized
     ) external onlyOwnerOrFactory {
         s_isFractionalized = _isFractionalized;
+        emit WorkFractionalized(_isFractionalized);
     }
 
     function setCFSubId(uint64 _subscriptionId) external onlyOwnerOrFactory {
@@ -199,10 +206,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     function _sendCertificateExtractionRequest(
         string[] calldata _args
     ) internal returns (bytes32 requestId) {
-        s_lastRequestId = _generateSendRequest(
-            _args,
-            s_certificateExtractionSource
-        );
+        _generateSendRequest(_args, s_certificateExtractionSource);
         s_requestById[s_lastRequestId] = WorkCFRequest(
             WorkCFRequestType.CertificateExtraction,
             "",
@@ -211,6 +215,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
             block.timestamp
         );
         s_verificationStep = VerificationStep.PendingCertificateAnalysis;
+        emit VerificationProcess(VerificationStep.PendingCertificateAnalysis);
         return s_lastRequestId;
     }
 
@@ -224,7 +229,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         _args[2] = s_certificate.artist;
         _args[3] = s_certificate.work;
 
-        s_lastRequestId = _generateSendRequest(_args, s_workVerificationSource);
+        _generateSendRequest(_args, s_workVerificationSource);
         s_requestById[s_lastRequestId] = WorkCFRequest(
             WorkCFRequestType.WorkVerification,
             _args[0],
@@ -233,6 +238,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
             block.timestamp
         );
         s_verificationStep = VerificationStep.PendingWorkVerification;
+        emit VerificationProcess(VerificationStep.PendingWorkVerification);
         return s_lastRequestId;
     }
 
@@ -255,6 +261,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
             s_donID
         );
 
+        emit ChainlinkRequestSent(s_lastRequestId);
         return s_lastRequestId;
     }
 
@@ -305,19 +312,23 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
         if (bytes(artist).length == 0 || bytes(work).length == 0 || year == 0) {
             s_lastError = err;
-            emit Response(requestId, 0, s_lastResponse, s_lastError);
+            emit ChainlinkResponse(requestId, s_lastResponse, s_lastError);
             return;
         }
 
-        s_certificate = WorkCertificate(
+        WorkCertificate memory workCertificate;
+        workCertificate = WorkCertificate(
             artist,
             work,
             year,
             certificateImageHash
         );
+        s_certificate = workCertificate;
 
         s_verificationStep = VerificationStep.CertificateAnalysisDone;
-        emit Response(requestId, 0, s_lastResponse, s_lastError);
+        emit VerificationProcess(VerificationStep.CertificateAnalysisDone);
+        emit CertificateExtracted(workCertificate);
+        emit ChainlinkResponse(requestId, s_lastResponse, s_lastError);
     }
 
     function _fulfillWorkVerificationRequest(
@@ -332,17 +343,26 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
         if (priceUsd == 0) {
             s_lastError = err;
-            emit Response(requestId, priceUsd, s_lastResponse, s_lastError);
+            emit ChainlinkResponse(requestId, s_lastResponse, s_lastError);
             return;
         }
 
-        s_ownerName = ownerName;
-        s_lastVerifiedAt = block.timestamp;
-        s_workPriceUsd = priceUsd;
         _mintWork();
 
+        TokenizedWork memory tokenizedWork;
+        tokenizedWork = TokenizedWork({
+            artist: s_certificate.artist,
+            work: s_certificate.work,
+            ownerName: ownerName,
+            workPriceUsd: priceUsd,
+            lastVerifiedAt: block.timestamp
+        });
+        s_tokenizedWork = tokenizedWork;
+
         s_verificationStep = VerificationStep.Tokenized;
-        emit Response(requestId, priceUsd, s_lastResponse, s_lastError);
+        emit VerificationProcess(VerificationStep.Tokenized);
+        emit WorkTokenized(tokenizedWork);
+        emit ChainlinkResponse(requestId, s_lastResponse, s_lastError);
     }
 
     function _mintWork() internal {
@@ -363,7 +383,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     }
 
     function _ensureOwnerOrFactory() internal view {
-        if (msg.sender != owner() && msg.sender != i_factoryAddress) {
+        if (msg.sender != owner() && msg.sender != i_workFactoryAddress) {
             revert dWork__NotOwnerOrFactory();
         }
     }
@@ -376,24 +396,8 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         return s_isFractionalized;
     }
 
-    function getWorkPriceUsd() external view returns (uint256) {
-        return s_workPriceUsd;
-    }
-
-    function getWorkURI() external view returns (string memory) {
-        return s_workURI;
-    }
-
     function getCustomer() external view returns (address) {
         return s_customer;
-    }
-
-    function getLastVerifiedAt() external view returns (uint256) {
-        return s_lastVerifiedAt;
-    }
-
-    function getOwnerName() external view returns (string memory) {
-        return s_ownerName;
     }
 
     function getDonId() external view returns (bytes32) {
@@ -424,12 +428,8 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         return s_lastRequestId;
     }
 
-    function getFactoryAddress() external view returns (address) {
-        return i_factoryAddress;
-    }
-
-    function getBaseURI() external pure returns (string memory) {
-        return BASE_URI;
+    function getWorkFactoryAddress() external view returns (address) {
+        return i_workFactoryAddress;
     }
 
     function getCertificate() external view returns (WorkCertificate memory) {
@@ -438,5 +438,9 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     function getVerificationStep() external view returns (VerificationStep) {
         return s_verificationStep;
+    }
+
+    function getTokenizedWork() external view returns (TokenizedWork memory) {
+        return s_tokenizedWork;
     }
 }

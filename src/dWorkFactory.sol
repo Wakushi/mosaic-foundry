@@ -63,8 +63,7 @@ contract dWorkFactory is Ownable {
     function deployWork(
         address _customer,
         string memory _workName,
-        string memory _workSymbol,
-        string memory _workURI
+        string memory _workSymbol
     ) external onlyOwner returns (address) {
         IDWorkConfig.dWorkConfig memory workConfig = IDWorkConfig.dWorkConfig({
             initialOwner: owner(),
@@ -78,7 +77,6 @@ contract dWorkFactory is Ownable {
             customer: _customer,
             workName: _workName,
             workSymbol: _workSymbol,
-            workURI: _workURI,
             factoryAddress: address(this)
         });
         dWork newWork = new dWork(workConfig);
