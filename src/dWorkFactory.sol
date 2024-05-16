@@ -4,9 +4,9 @@ pragma solidity ^0.8.19;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {dWork} from "./dWork.sol";
-import {dWorkShare} from "./dWorkShare.sol";
 import {IDWork} from "./interfaces/IDWork.sol";
 import {IDWorkConfig} from "./interfaces/IDWorkConfig.sol";
+import {IDWorkSharesManager} from "./interfaces/IDWorkSharesManager.sol";
 
 contract dWorkFactory is Ownable {
     ///////////////////
@@ -20,17 +20,19 @@ contract dWorkFactory is Ownable {
     bytes s_secretReference;
     string s_workVerificationSource;
     string s_certificateExtractionSource;
+
     address s_priceFeed;
+    address s_workSharesManager;
 
     mapping(address customer => address[] works) s_customerWorks;
-    mapping(address workContract => address sharesContract) s_workShares;
+    mapping(address workContract => uint256 workSharesTokenId) s_workShares;
 
     ///////////////////
     // Events
     ///////////////////
 
     event WorkDeployed(address workAddress, address customer);
-    event WorkSharesDeployed(address workSharesAddress, address workContract);
+    event WorkSharesCreated(uint256 sharesTokenId, address workContract);
 
     //////////////////
     // Errors
@@ -68,7 +70,7 @@ contract dWorkFactory is Ownable {
         string memory _appraiserReportIPFSHash
     ) external onlyOwner returns (address) {
         IDWorkConfig.dWorkConfig memory workConfig = IDWorkConfig.dWorkConfig({
-            initialOwner: owner(),
+            owner: owner(),
             donId: s_donID,
             functionsRouter: s_functionsRouter,
             functionsSubId: s_functionsSubId,
@@ -81,7 +83,8 @@ contract dWorkFactory is Ownable {
             customer: _customer,
             workName: _workName,
             workSymbol: _workSymbol,
-            factoryAddress: address(this)
+            factoryAddress: address(this),
+            workSharesManagerAddress: s_workSharesManager
         });
         dWork newWork = new dWork(workConfig);
         address newWorkAddress = address(newWork);
@@ -90,12 +93,11 @@ contract dWorkFactory is Ownable {
         return newWorkAddress;
     }
 
-    function deployWorkShare(
+    function createWorkShares(
         address _workContract,
         uint256 _shareSupply,
-        string memory _name,
-        string memory _symbol
-    ) external onlyOwner returns (address) {
+        uint256 _shareAmount
+    ) external onlyOwner {
         IDWork dWorkContract = IDWork(_workContract);
         if (!dWorkContract.isMinted()) {
             revert dWorkFactory__WorkNotMinted();
@@ -113,21 +115,17 @@ contract dWorkFactory is Ownable {
         uint256 _sharePriceUsd = workPriceUsd / _shareSupply;
         address workOwner = dWorkContract.getWorkOwner();
 
-        dWorkShare newWorkShares = new dWorkShare(
-            _workContract,
-            workOwner,
-            _shareSupply,
-            _sharePriceUsd,
-            _name,
-            _symbol,
-            s_priceFeed
-        );
+        uint256 sharesTokenId = IDWorkSharesManager(s_workSharesManager)
+            .createShares(
+                _workContract,
+                workOwner,
+                _shareSupply,
+                _sharePriceUsd,
+                _shareAmount
+            );
 
-        dWorkContract.setWorkShareContract(address(newWorkShares));
-        address newWorkSharesAddress = address(newWorkShares);
-        s_workShares[_workContract] = newWorkSharesAddress;
-        emit WorkSharesDeployed(newWorkSharesAddress, _workContract);
-        return newWorkSharesAddress;
+        dWorkContract.setWorkSharesTokenId(sharesTokenId);
+        emit WorkSharesCreated(sharesTokenId, _workContract);
     }
 
     //////////////////
@@ -140,9 +138,9 @@ contract dWorkFactory is Ownable {
         return s_customerWorks[_customer];
     }
 
-    function getWorkShares(
+    function getWorkSharesTokenId(
         address _workContract
-    ) external view returns (address) {
+    ) external view returns (uint256) {
         return s_workShares[_workContract];
     }
 }

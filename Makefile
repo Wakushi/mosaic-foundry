@@ -59,7 +59,10 @@ ifeq ($(findstring --network fuji,$(ARGS)),--network fuji)
 	NETWORK_ARGS := --rpc-url $(FUJI_RPC_URL) --private-key $(PRIVATE_KEY) --broadcast --verifier-url 'https://api.routescan.io/v2/network/testnet/evm/43113/etherscan' --etherscan-api-key "verifyContract" -vvvv
 endif
 
-deploy:
+deployShares:
+	@forge script script/DeployDWorkShares.s.sol:DeployDWorkShares $(NETWORK_ARGS)
+
+deployFactory:
 	@forge script script/DeployDWorkFactory.s.sol:DeployDWorkFactory $(NETWORK_ARGS)
 
 createSubscription:

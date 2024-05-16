@@ -3,7 +3,7 @@ pragma solidity ^0.8.19;
 
 interface IDWorkConfig {
     struct dWorkConfig {
-        address initialOwner;
+        address owner;
         bytes32 donId;
         address functionsRouter;
         uint64 functionsSubId;
@@ -17,5 +17,6 @@ interface IDWorkConfig {
         string workName;
         string workSymbol;
         address factoryAddress;
+        address workSharesManagerAddress;
     }
 }

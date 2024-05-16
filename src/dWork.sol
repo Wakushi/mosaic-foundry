@@ -10,7 +10,7 @@ import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {OracleLib, AggregatorV3Interface} from "./libraries/OracleLib.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IDWorkConfig} from "./interfaces/IDWorkConfig.sol";
-import {IDWorkShare} from "./interfaces/IDWorkShare.sol";
+import {IDWorkSharesManager} from "./interfaces/IDWorkSharesManager.sol";
 
 contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     ///////////////////
@@ -86,15 +86,16 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     bool s_isMinted;
     uint256 lastVerifiedAt;
-    address s_workShareContract;
+    uint256 s_sharesTokenId;
 
     address s_workOwner;
+    address immutable i_workSharesManager;
 
     ///////////////////
     // Events
     ///////////////////
 
-    event WorkFractionalized(address workShareContract);
+    event WorkFractionalized(uint256 sharesTokenId);
     event ChainlinkRequestSent(bytes32 requestId);
     event VerificationProcess(VerificationStep step);
     event CertificateExtracted(WorkCertificate certificate);
@@ -154,7 +155,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         IDWorkConfig.dWorkConfig memory _config
     )
         FunctionsClient(_config.functionsRouter)
-        Ownable(_config.initialOwner)
+        Ownable(_config.owner)
         ERC721(_config.workName, _config.workSymbol)
     {
         s_donID = _config.donId;
@@ -167,6 +168,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         s_lastAppraiserReportIPFSHash = _config.appraiserReportIPFSHash;
         s_workOwner = _config.customer;
         i_workFactoryAddress = _config.factoryAddress;
+        i_workSharesManager = _config.workSharesManagerAddress;
         s_verificationStep = VerificationStep.Pending;
     }
 
@@ -213,22 +215,22 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         s_lastAppraiserReportIPFSHash = _newAppraiserReportIPFSHash;
     }
 
-    function setWorkShareContract(
-        address _workShareContract
+    function setWorkSharesTokenId(
+        uint256 _sharesTokenId
     ) external onlyFactory whenNotPaused {
-        s_workShareContract = _workShareContract;
-        emit WorkFractionalized(_workShareContract);
+        s_sharesTokenId = _sharesTokenId;
+        emit WorkFractionalized(_sharesTokenId);
     }
 
-    function setCFSubId(uint64 _subscriptionId) external onlyOwnerOrFactory {
+    function updateCFSubId(uint64 _subscriptionId) external onlyOwnerOrFactory {
         s_functionsSubId = _subscriptionId;
     }
 
-    function setDonId(bytes32 _newDonId) external onlyOwnerOrFactory {
+    function updateDonId(bytes32 _newDonId) external onlyOwnerOrFactory {
         s_donID = _newDonId;
     }
 
-    function setSecretReference(
+    function updateSecretReference(
         bytes calldata _secretReference
     ) external onlyOwnerOrFactory {
         s_secretReference = _secretReference;
@@ -432,7 +434,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     /**
      * @dev Compare the latest appraiser report with the previous one to verify the work.
-     * If there is a significant difference, freeze the work
+     * If there is a significant difference, freeze the work contract
      */
     function _compareLatestAppraiserReport(
         string memory _ownerName,
@@ -445,7 +447,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         ) {
             _pause();
             if (isFractionalized()) {
-                IDWorkShare(s_workShareContract).pauseContract();
+                IDWorkSharesManager(i_workSharesManager).pauseShares();
             }
             emit LastVerificationFailed(
                 s_tokenizedWork.ownerName,
@@ -456,7 +458,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         } else {
             if (paused()) {
                 _unpause();
-                IDWorkShare(s_workShareContract).unpauseContract();
+                IDWorkSharesManager(i_workSharesManager).unpauseShares();
             }
         }
     }
@@ -530,7 +532,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     }
 
     function isFractionalized() public view returns (bool) {
-        return s_workShareContract != address(0);
+        return s_sharesTokenId != 0;
     }
 
     function getWorkOwner() external view returns (address) {
@@ -573,8 +575,8 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         return s_tokenizedWork;
     }
 
-    function getWorkShareContract() external view returns (address) {
-        return s_workShareContract;
+    function getSharesTokenId() external view returns (uint256) {
+        return s_sharesTokenId;
     }
 
     function getCustomerSubmissionIPFSHash()
