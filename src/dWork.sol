@@ -120,6 +120,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     error dWork__NotOwnerOrFactory();
     error dWork__ProcessOrderError();
     error dWork__NotEnoughTimePassedSinceLastVerification();
+    error dWork__NotWorkOwner();
 
     //////////////////
     // Modifiers
@@ -132,6 +133,16 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     modifier onlyOwnerOrFactory() {
         _ensureOwnerOrFactory();
+        _;
+    }
+
+    modifier onlyFactory() {
+        _ensureOnlyFactory();
+        _;
+    }
+
+    modifier onlyWorkOwner() {
+        _ensureOnlyWorkOwner();
         _;
     }
 
@@ -204,7 +215,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     function setWorkShareContract(
         address _workShareContract
-    ) external onlyOwnerOrFactory whenNotPaused {
+    ) external onlyFactory whenNotPaused {
         s_workShareContract = _workShareContract;
         emit WorkFractionalized(_workShareContract);
     }
@@ -223,17 +234,18 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         s_secretReference = _secretReference;
     }
 
+    // What happens if the work is approved to a different address?
     function approve(
         address to,
         uint256 tokenId
-    ) public override whenNotPaused {
+    ) public override whenNotPaused onlyWorkOwner {
         super.approve(to, tokenId);
     }
 
     function setApprovalForAll(
         address operator,
         bool approved
-    ) public override whenNotPaused {
+    ) public override whenNotPaused onlyWorkOwner {
         super.setApprovalForAll(operator, approved);
     }
 
@@ -241,7 +253,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         address from,
         address to,
         uint256 tokenId
-    ) public override whenNotPaused {
+    ) public override whenNotPaused onlyWorkOwner {
         super.transferFrom(from, to, tokenId);
         s_workOwner = to;
     }
@@ -251,7 +263,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         address to,
         uint256 tokenId,
         bytes memory data
-    ) public override whenNotPaused {
+    ) public override whenNotPaused onlyWorkOwner {
         super.safeTransferFrom(from, to, tokenId, data);
         s_workOwner = to;
     }
@@ -488,6 +500,18 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         }
     }
 
+    function _ensureOnlyFactory() internal view {
+        if (msg.sender != i_workFactoryAddress) {
+            revert dWork__NotOwnerOrFactory();
+        }
+    }
+
+    function _ensureOnlyWorkOwner() internal view {
+        if (msg.sender != s_workOwner) {
+            revert dWork__NotWorkOwner();
+        }
+    }
+
     function _ensureEnoughTimePassedSinceLastVerification() internal view {
         if (
             lastVerifiedAt != 0 &&
@@ -496,6 +520,10 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
             revert dWork__NotEnoughTimePassedSinceLastVerification();
         }
     }
+
+    ////////////////////
+    // External / Public View
+    ////////////////////
 
     function isMinted() public view returns (bool) {
         return s_isMinted;
@@ -507,14 +535,6 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     function getWorkOwner() external view returns (address) {
         return s_workOwner;
-    }
-
-    function getDonId() external view returns (bytes32) {
-        return s_donID;
-    }
-
-    function getGasLimit() external view returns (uint32) {
-        return s_gasLimit;
     }
 
     function getWorkVerificationSource() external view returns (string memory) {
