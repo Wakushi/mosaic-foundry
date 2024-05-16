@@ -10,6 +10,7 @@ import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {OracleLib, AggregatorV3Interface} from "./libraries/OracleLib.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IDWorkConfig} from "./interfaces/IDWorkConfig.sol";
+import {IDWorkShare} from "./interfaces/IDWorkShare.sol";
 
 contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     ///////////////////
@@ -74,6 +75,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     mapping(bytes32 requestId => WorkCFRequest request) private s_requestById;
 
     // Work state
+    uint256 constant MIN_VERIFICATION_INTERVAL = 30 days;
     address immutable i_workFactoryAddress;
     string s_customerSubmissionIPFSHash;
     string s_lastAppraiserReportIPFSHash;
@@ -86,7 +88,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     uint256 lastVerifiedAt;
     address s_workShareContract;
 
-    address s_customer;
+    address s_workOwner;
 
     ///////////////////
     // Events
@@ -117,6 +119,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     error dWork__UnexpectedRequestID(bytes32 requestId);
     error dWork__NotOwnerOrFactory();
     error dWork__ProcessOrderError();
+    error dWork__NotEnoughTimePassedSinceLastVerification();
 
     //////////////////
     // Modifiers
@@ -151,7 +154,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         s_certificateExtractionSource = _config.certificateExtractionSource;
         s_customerSubmissionIPFSHash = _config.customerSubmissionIPFSHash;
         s_lastAppraiserReportIPFSHash = _config.appraiserReportIPFSHash;
-        s_customer = _config.customer;
+        s_workOwner = _config.customer;
         i_workFactoryAddress = _config.factoryAddress;
         s_verificationStep = VerificationStep.Pending;
     }
@@ -187,7 +190,9 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
      */
     function requestWorkVerification() external {
         _ensureProcessOrder(VerificationStep.CertificateAnalysisDone);
-        // TO-DO Add a timestamp check to prevent calling this function multiple times in a month if already minted
+        if (isMinted()) {
+            _ensureEnoughTimePassedSinceLastVerification();
+        }
         _sendWorkVerificationRequest();
     }
 
@@ -238,6 +243,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         uint256 tokenId
     ) public override whenNotPaused {
         super.transferFrom(from, to, tokenId);
+        s_workOwner = to;
     }
 
     function safeTransferFrom(
@@ -247,6 +253,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         bytes memory data
     ) public override whenNotPaused {
         super.safeTransferFrom(from, to, tokenId, data);
+        s_workOwner = to;
     }
 
     ////////////////////
@@ -425,7 +432,9 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
             _priceUsd != s_tokenizedWork.workPriceUsd
         ) {
             _pause();
-            // Also freeze the share token contract if the work is fractionalized
+            if (isFractionalized()) {
+                IDWorkShare(s_workShareContract).pauseContract();
+            }
             emit LastVerificationFailed(
                 s_tokenizedWork.ownerName,
                 s_tokenizedWork.workPriceUsd,
@@ -435,6 +444,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         } else {
             if (paused()) {
                 _unpause();
+                IDWorkShare(s_workShareContract).unpauseContract();
             }
         }
     }
@@ -457,7 +467,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     function _mintWork() internal {
         s_isMinted = true;
-        _safeMint(s_customer, 0);
+        _safeMint(s_workOwner, 0);
     }
 
     function _ensureNotMinted() internal view {
@@ -478,16 +488,25 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         }
     }
 
+    function _ensureEnoughTimePassedSinceLastVerification() internal view {
+        if (
+            lastVerifiedAt != 0 &&
+            block.timestamp - lastVerifiedAt < MIN_VERIFICATION_INTERVAL
+        ) {
+            revert dWork__NotEnoughTimePassedSinceLastVerification();
+        }
+    }
+
     function isMinted() public view returns (bool) {
         return s_isMinted;
     }
 
-    function isFractionalized() external view returns (bool) {
+    function isFractionalized() public view returns (bool) {
         return s_workShareContract != address(0);
     }
 
-    function getCustomer() external view returns (address) {
-        return s_customer;
+    function getWorkOwner() external view returns (address) {
+        return s_workOwner;
     }
 
     function getDonId() external view returns (bytes32) {
@@ -532,5 +551,29 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     function getTokenizedWork() external view returns (TokenizedWork memory) {
         return s_tokenizedWork;
+    }
+
+    function getWorkShareContract() external view returns (address) {
+        return s_workShareContract;
+    }
+
+    function getCustomerSubmissionIPFSHash()
+        external
+        view
+        returns (string memory)
+    {
+        return s_customerSubmissionIPFSHash;
+    }
+
+    function getLastAppraiserReportIPFSHash()
+        external
+        view
+        returns (string memory)
+    {
+        return s_lastAppraiserReportIPFSHash;
+    }
+
+    function getLastVerifiedAt() external view returns (uint256) {
+        return lastVerifiedAt;
     }
 }

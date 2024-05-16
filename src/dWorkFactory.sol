@@ -5,7 +5,7 @@ pragma solidity ^0.8.19;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {dWork} from "./dWork.sol";
 import {dWorkShare} from "./dWorkShare.sol";
-import {IDWork} from "./interfaces/IdWork.sol";
+import {IDWork} from "./interfaces/IDWork.sol";
 import {IDWorkConfig} from "./interfaces/IDWorkConfig.sol";
 
 contract dWorkFactory is Ownable {
@@ -92,7 +92,6 @@ contract dWorkFactory is Ownable {
 
     function deployWorkShare(
         address _workContract,
-        address _initialOwner,
         uint256 _shareSupply,
         string memory _name,
         string memory _symbol
@@ -112,10 +111,11 @@ contract dWorkFactory is Ownable {
         }
 
         uint256 _sharePriceUsd = workPriceUsd / _shareSupply;
+        address workOwner = dWorkContract.getWorkOwner();
 
         dWorkShare newWorkShares = new dWorkShare(
             _workContract,
-            _initialOwner,
+            workOwner,
             _shareSupply,
             _sharePriceUsd,
             _name,

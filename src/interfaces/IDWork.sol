@@ -9,4 +9,6 @@ interface IDWork {
     function setWorkShareContract(address _workShareContract) external;
 
     function getWorkPriceUsd() external view returns (uint256);
+
+    function getWorkOwner() external view returns (address);
 }

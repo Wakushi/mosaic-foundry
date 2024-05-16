@@ -8,7 +8,7 @@ import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interf
 import {PriceConverter} from "./libraries/PriceConverter.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
-contract dWorkShare is ERC20, Ownable, Pausable {
+contract dWorkShare is ERC20, Pausable {
     using PriceConverter for uint256;
 
     ///////////////////
@@ -20,9 +20,10 @@ contract dWorkShare is ERC20, Ownable, Pausable {
 
     uint256 immutable i_maxShareSupply;
     uint256 immutable i_sharePriceUsd;
+    address immutable i_workContract;
     uint256 s_totalShareBought;
     uint256 s_totalSellValueUsd;
-    address s_workContract;
+    address s_workOwner;
 
     ///////////////////
     // Events
@@ -36,6 +37,7 @@ contract dWorkShare is ERC20, Ownable, Pausable {
 
     error dWorkShare__InsufficientFunds();
     error dWorkShare__InitialSaleClosed();
+    error dWork__NotWorkContract();
 
     //////////////////
     // Functions
@@ -49,15 +51,18 @@ contract dWorkShare is ERC20, Ownable, Pausable {
         string memory _name,
         string memory _symbol,
         address _priceFeed
-    ) ERC20(_name, _symbol) Ownable(_workOwner) {
+    ) ERC20(_name, _symbol) {
         _mint(_workOwner, _shareSupply);
         i_sharePriceUsd = _sharePriceUsd;
         i_maxShareSupply = _shareSupply;
-        s_workContract = _workContract;
+        i_workContract = _workContract;
         s_priceFeed = AggregatorV3Interface(_priceFeed);
+        s_workOwner = _workOwner;
     }
 
-    function buyInitialShare(uint256 _shareAmount) external payable {
+    function buyInitialShare(
+        uint256 _shareAmount
+    ) external payable whenNotPaused {
         if (s_totalShareBought + _shareAmount > i_maxShareSupply) {
             revert dWorkShare__InitialSaleClosed();
         }
@@ -71,11 +76,40 @@ contract dWorkShare is ERC20, Ownable, Pausable {
 
         ++s_totalShareBought;
         s_totalSellValueUsd += usdAmountDue;
-        _transfer(owner(), msg.sender, _shareAmount);
+        _transfer(s_workOwner, msg.sender, _shareAmount);
         emit ShareBought(_shareAmount, msg.sender);
     }
 
-    // CREATE PAUSE FUNCTION (only dWork or Factory)
+    function pauseContract() external whenNotPaused {
+        _ensureOnlyWorkContract();
+        _pause();
+    }
+
+    function unpauseContract() external whenPaused {
+        _ensureOnlyWorkContract();
+        _unpause();
+    }
+
+    function transfer(
+        address to,
+        uint256 value
+    ) public override whenNotPaused returns (bool) {
+        return super.transfer(to, value);
+    }
+
+    function transferFrom(
+        address from,
+        address to,
+        uint256 value
+    ) public override whenNotPaused returns (bool) {
+        return super.transferFrom(from, to, value);
+    }
+
+    function _ensureOnlyWorkContract() internal view {
+        if (msg.sender != i_workContract) {
+            revert dWork__NotWorkContract();
+        }
+    }
 
     function getSharePriceUsd() external view returns (uint256) {
         return i_sharePriceUsd;
@@ -94,6 +128,6 @@ contract dWorkShare is ERC20, Ownable, Pausable {
     }
 
     function getWorkContract() external view returns (address) {
-        return s_workContract;
+        return i_workContract;
     }
 }
