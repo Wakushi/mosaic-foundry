@@ -11,6 +11,8 @@ interface IDWorkConfig {
         bytes secretReference;
         string workVerificationSource;
         string certificateExtractionSource;
+        string customerSubmissionIPFSHash;
+        string appraiserReportIPFSHash;
         address customer;
         string workName;
         string workSymbol;

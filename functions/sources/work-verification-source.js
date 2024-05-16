@@ -72,13 +72,6 @@ async function fetchWorkMarketData(work) {
   }
 }
 
-async function fetchCustomer(customerHash) {
-  const client = await Functions.makeHttpRequest({
-    url: `${MOSAIC_API_BASE_URL}/${customerHash}`,
-  })
-  return client.data
-}
-
 async function fetchCustomerWork(workHash) {
   const work = await Functions.makeHttpRequest({
     url: `${MOSAIC_API_BASE_URL}/${workHash}`,

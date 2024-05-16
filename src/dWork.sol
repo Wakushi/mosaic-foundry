@@ -52,7 +52,6 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         string work;
         string ownerName;
         uint256 workPriceUsd;
-        uint256 lastVerifiedAt;
     }
 
     ///////////////////
@@ -76,13 +75,16 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     // Work state
     address immutable i_workFactoryAddress;
+    string s_customerSubmissionIPFSHash;
+    string s_lastAppraiserReportIPFSHash;
 
     VerificationStep s_verificationStep;
     WorkCertificate s_certificate;
     TokenizedWork s_tokenizedWork;
 
     bool s_isMinted;
-    bool s_isFractionalized;
+    uint256 lastVerifiedAt;
+    address s_workShareContract;
 
     address s_customer;
 
@@ -90,11 +92,17 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     // Events
     ///////////////////
 
-    event WorkFractionalized(bool isFractionalized);
+    event WorkFractionalized(address workShareContract);
     event ChainlinkRequestSent(bytes32 requestId);
     event VerificationProcess(VerificationStep step);
     event CertificateExtracted(WorkCertificate certificate);
     event WorkTokenized(TokenizedWork tokenizedWork);
+    event LastVerificationFailed(
+        string previousOwner,
+        uint256 previousPrice,
+        string newOwner,
+        uint256 newPrice
+    );
     event ChainlinkResponse(
         bytes32 indexed requestId,
         bytes response,
@@ -141,6 +149,8 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         s_secretReference = _config.secretReference;
         s_workVerificationSource = _config.workVerificationSource;
         s_certificateExtractionSource = _config.certificateExtractionSource;
+        s_customerSubmissionIPFSHash = _config.customerSubmissionIPFSHash;
+        s_lastAppraiserReportIPFSHash = _config.appraiserReportIPFSHash;
         s_customer = _config.customer;
         i_workFactoryAddress = _config.factoryAddress;
         s_verificationStep = VerificationStep.Pending;
@@ -153,7 +163,12 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     /**
      *
      * @param _args [CERTIFICATE IMAGE IPFS HASH]
-     * @dev Performs multiple API calls using Chainlink Functions to extract the certificate data
+     *
+     * @dev Extract the certificate of authenticity data from the scanned image using Chainlink Functions and OpenAI GPT-4o.
+     * The certificate data includes the artist name, work name, and year of creation.
+     * Once request is fulfilled, the contract will automatically request the work verification.
+     *
+     * Note: This function can only be called once.
      */
     function requestCertificateExtraction(
         string[] calldata _args
@@ -162,27 +177,31 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     }
 
     /**
+     * @dev Request the work verification using Chainlink Functions and OpenAI GPT-4o.
+     * This request will fetch the data from the customer submission, the appraiser report and global market data,
+     * join the certificate data obtained by requestCertificateExtraction() and logitically verify the work.
+     * Once the request is fulfilled, the contract will mint the work as an ERC721 token.
      *
-     * @param _customerSubmissionHash IPFS hash of the customer's submission
-     * @param _appraiserReportHash IPFS hash of the appraiser's report
-     * @dev Performs multiple API calls using Chainlink Functions to verify the work
+     * Note: This function will be called automatically after the certificate extraction request is fulfilled, and then
+     * every month with the latest appraiser report using Chainlink Automation.
      */
-    function requestWorkVerification(
-        string memory _customerSubmissionHash,
-        string memory _appraiserReportHash
-    ) external onlyOwnerOrFactory notMinted {
+    function requestWorkVerification() external {
         _ensureProcessOrder(VerificationStep.CertificateAnalysisDone);
-        _sendWorkVerificationRequest(
-            _customerSubmissionHash,
-            _appraiserReportHash
-        );
+        // TO-DO Add a timestamp check to prevent calling this function multiple times in a month if already minted
+        _sendWorkVerificationRequest();
     }
 
-    function setIsFractionalized(
-        bool _isFractionalized
+    function updateLastAppraiserReportIPFSHash(
+        string calldata _newAppraiserReportIPFSHash
     ) external onlyOwnerOrFactory {
-        s_isFractionalized = _isFractionalized;
-        emit WorkFractionalized(_isFractionalized);
+        s_lastAppraiserReportIPFSHash = _newAppraiserReportIPFSHash;
+    }
+
+    function setWorkShareContract(
+        address _workShareContract
+    ) external onlyOwnerOrFactory whenNotPaused {
+        s_workShareContract = _workShareContract;
+        emit WorkFractionalized(_workShareContract);
     }
 
     function setCFSubId(uint64 _subscriptionId) external onlyOwnerOrFactory {
@@ -197,6 +216,37 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         bytes calldata _secretReference
     ) external onlyOwnerOrFactory {
         s_secretReference = _secretReference;
+    }
+
+    function approve(
+        address to,
+        uint256 tokenId
+    ) public override whenNotPaused {
+        super.approve(to, tokenId);
+    }
+
+    function setApprovalForAll(
+        address operator,
+        bool approved
+    ) public override whenNotPaused {
+        super.setApprovalForAll(operator, approved);
+    }
+
+    function transferFrom(
+        address from,
+        address to,
+        uint256 tokenId
+    ) public override whenNotPaused {
+        super.transferFrom(from, to, tokenId);
+    }
+
+    function safeTransferFrom(
+        address from,
+        address to,
+        uint256 tokenId,
+        bytes memory data
+    ) public override whenNotPaused {
+        super.safeTransferFrom(from, to, tokenId, data);
     }
 
     ////////////////////
@@ -219,13 +269,13 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         return s_lastRequestId;
     }
 
-    function _sendWorkVerificationRequest(
-        string memory _customerSubmissionHash,
-        string memory _appraiserReportHash
-    ) internal returns (bytes32 requestId) {
+    function _sendWorkVerificationRequest()
+        internal
+        returns (bytes32 requestId)
+    {
         string[] memory _args = new string[](4);
-        _args[0] = _customerSubmissionHash;
-        _args[1] = _appraiserReportHash;
+        _args[0] = s_customerSubmissionIPFSHash;
+        _args[1] = s_lastAppraiserReportIPFSHash;
         _args[2] = s_certificate.artist;
         _args[3] = s_certificate.work;
 
@@ -323,9 +373,12 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
             year,
             certificateImageHash
         );
-        s_certificate = workCertificate;
 
+        s_certificate = workCertificate;
         s_verificationStep = VerificationStep.CertificateAnalysisDone;
+
+        _sendWorkVerificationRequest();
+
         emit VerificationProcess(VerificationStep.CertificateAnalysisDone);
         emit CertificateExtracted(workCertificate);
         emit ChainlinkResponse(requestId, s_lastResponse, s_lastError);
@@ -347,22 +400,59 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
             return;
         }
 
-        _mintWork();
+        if (isMinted()) {
+            _compareLatestAppraiserReport(ownerName, priceUsd);
+        } else {
+            _tokenizeWork(ownerName, priceUsd);
+        }
 
+        s_verificationStep = VerificationStep.Tokenized;
+        emit VerificationProcess(VerificationStep.Tokenized);
+        emit ChainlinkResponse(requestId, s_lastResponse, s_lastError);
+    }
+
+    /**
+     * @dev Compare the latest appraiser report with the previous one to verify the work.
+     * If there is a significant difference, freeze the work
+     */
+    function _compareLatestAppraiserReport(
+        string memory _ownerName,
+        uint256 _priceUsd
+    ) internal {
+        if (
+            (keccak256(abi.encodePacked(_ownerName)) !=
+                keccak256(abi.encodePacked(s_tokenizedWork.ownerName))) ||
+            _priceUsd != s_tokenizedWork.workPriceUsd
+        ) {
+            _pause();
+            // Also freeze the share token contract if the work is fractionalized
+            emit LastVerificationFailed(
+                s_tokenizedWork.ownerName,
+                s_tokenizedWork.workPriceUsd,
+                _ownerName,
+                _priceUsd
+            );
+        } else {
+            if (paused()) {
+                _unpause();
+            }
+        }
+    }
+
+    function _tokenizeWork(
+        string memory _ownerName,
+        uint256 _priceUsd
+    ) internal {
+        _mintWork();
         TokenizedWork memory tokenizedWork;
         tokenizedWork = TokenizedWork({
             artist: s_certificate.artist,
             work: s_certificate.work,
-            ownerName: ownerName,
-            workPriceUsd: priceUsd,
-            lastVerifiedAt: block.timestamp
+            ownerName: _ownerName,
+            workPriceUsd: _priceUsd
         });
         s_tokenizedWork = tokenizedWork;
-
-        s_verificationStep = VerificationStep.Tokenized;
-        emit VerificationProcess(VerificationStep.Tokenized);
         emit WorkTokenized(tokenizedWork);
-        emit ChainlinkResponse(requestId, s_lastResponse, s_lastError);
     }
 
     function _mintWork() internal {
@@ -393,7 +483,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     }
 
     function isFractionalized() external view returns (bool) {
-        return s_isFractionalized;
+        return s_workShareContract != address(0);
     }
 
     function getCustomer() external view returns (address) {

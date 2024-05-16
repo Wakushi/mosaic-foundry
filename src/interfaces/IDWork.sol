@@ -6,7 +6,7 @@ interface IDWork {
 
     function isFractionalized() external view returns (bool);
 
-    function setIsFractionalized(bool _isFractionalized) external;
+    function setWorkShareContract(address _workShareContract) external;
 
     function getWorkPriceUsd() external view returns (uint256);
 }

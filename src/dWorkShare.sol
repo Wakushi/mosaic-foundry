@@ -6,8 +6,9 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {PriceConverter} from "./libraries/PriceConverter.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
-contract dWorkShare is ERC20, Ownable {
+contract dWorkShare is ERC20, Ownable, Pausable {
     using PriceConverter for uint256;
 
     ///////////////////
@@ -73,6 +74,8 @@ contract dWorkShare is ERC20, Ownable {
         _transfer(owner(), msg.sender, _shareAmount);
         emit ShareBought(_shareAmount, msg.sender);
     }
+
+    // CREATE PAUSE FUNCTION (only dWork or Factory)
 
     function getSharePriceUsd() external view returns (uint256) {
         return i_sharePriceUsd;

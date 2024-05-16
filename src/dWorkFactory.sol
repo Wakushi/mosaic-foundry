@@ -63,7 +63,9 @@ contract dWorkFactory is Ownable {
     function deployWork(
         address _customer,
         string memory _workName,
-        string memory _workSymbol
+        string memory _workSymbol,
+        string memory _customerSubmissionIPFSHash,
+        string memory _appraiserReportIPFSHash
     ) external onlyOwner returns (address) {
         IDWorkConfig.dWorkConfig memory workConfig = IDWorkConfig.dWorkConfig({
             initialOwner: owner(),
@@ -74,6 +76,8 @@ contract dWorkFactory is Ownable {
             secretReference: s_secretReference,
             workVerificationSource: s_workVerificationSource,
             certificateExtractionSource: s_certificateExtractionSource,
+            customerSubmissionIPFSHash: _customerSubmissionIPFSHash,
+            appraiserReportIPFSHash: _appraiserReportIPFSHash,
             customer: _customer,
             workName: _workName,
             workSymbol: _workSymbol,
@@ -119,7 +123,7 @@ contract dWorkFactory is Ownable {
             s_priceFeed
         );
 
-        dWorkContract.setIsFractionalized(true);
+        dWorkContract.setWorkShareContract(address(newWorkShares));
         address newWorkSharesAddress = address(newWorkShares);
         s_workShares[_workContract] = newWorkSharesAddress;
         emit WorkSharesDeployed(newWorkSharesAddress, _workContract);
