@@ -95,8 +95,7 @@ contract dWorkFactory is Ownable {
 
     function createWorkShares(
         address _workContract,
-        uint256 _shareSupply,
-        uint256 _shareAmount
+        uint256 _shareSupply
     ) external onlyOwner {
         IDWork dWorkContract = IDWork(_workContract);
         if (!dWorkContract.isMinted()) {
@@ -120,8 +119,7 @@ contract dWorkFactory is Ownable {
                 _workContract,
                 workOwner,
                 _shareSupply,
-                _sharePriceUsd,
-                _shareAmount
+                _sharePriceUsd
             );
 
         dWorkContract.setWorkSharesTokenId(sharesTokenId);

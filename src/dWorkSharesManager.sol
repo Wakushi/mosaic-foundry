@@ -88,8 +88,7 @@ contract dWorkSharesManager is ERC1155, Ownable {
         address _workContract,
         address _workOwner,
         uint256 _shareSupply,
-        uint256 _sharePriceUsd,
-        uint256 _shareAmount
+        uint256 _sharePriceUsd
     ) external returns (uint256) {
         _ensureOnlyWorkFactory();
 
@@ -97,7 +96,7 @@ contract dWorkSharesManager is ERC1155, Ownable {
             ++s_tokenId;
         }
 
-        _mint(_workOwner, _shareAmount, s_tokenId, "");
+        _mint(_workOwner, _shareSupply, s_tokenId, "");
 
         s_workShares[s_tokenId] = WorkShares({
             maxShareSupply: _shareSupply,

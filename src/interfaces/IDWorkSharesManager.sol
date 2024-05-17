@@ -6,8 +6,7 @@ interface IDWorkSharesManager {
         address _workContract,
         address _workOwner,
         uint256 _shareSupply,
-        uint256 _sharePriceUsd,
-        uint256 _shareAmount
+        uint256 _sharePriceUsd
     ) external returns (uint256);
 
     function pauseShares() external;
