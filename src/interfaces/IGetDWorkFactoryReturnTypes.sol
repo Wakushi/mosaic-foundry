@@ -5,6 +5,7 @@ interface IGetDWorkFactoryReturnTypes {
     struct GetDWorkFactoryReturnType {
         address functionsRouter;
         bytes32 donId;
+        bytes secretReference;
         uint64 functionsSubId;
         string workVerificationSource;
         string certificateExtractionSource;

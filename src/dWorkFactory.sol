@@ -45,6 +45,7 @@ contract dWorkFactory is Ownable {
     constructor(
         address _functionsRouter,
         bytes32 _donId,
+        bytes memory _secretReference,
         uint64 _functionsSubId,
         string memory _workVerificationSource,
         string memory _certificateExtractionSource,
@@ -52,6 +53,7 @@ contract dWorkFactory is Ownable {
     ) Ownable(msg.sender) {
         s_functionsRouter = _functionsRouter;
         s_donID = _donId;
+        s_secretReference = _secretReference;
         s_functionsSubId = _functionsSubId;
         s_workVerificationSource = _workVerificationSource;
         s_certificateExtractionSource = _certificateExtractionSource;
@@ -130,6 +132,12 @@ contract dWorkFactory is Ownable {
         address _workSharesManager
     ) external onlyOwner {
         s_workSharesManager = _workSharesManager;
+    }
+
+    function setSecretReference(
+        bytes memory _secretReference
+    ) external onlyOwner {
+        s_secretReference = _secretReference;
     }
 
     //////////////////

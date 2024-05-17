@@ -7,10 +7,11 @@ import {dWorkFactory} from "../src/dWorkFactory.sol";
 import {IGetDWorkFactoryReturnTypes} from "../src/interfaces/IGetDWorkFactoryReturnTypes.sol";
 
 contract DeployDWorkFactory is Script {
-    string constant workVerificationSource =
+    string constant WORK_VERIFIATION_SOURCE =
         "./functions/sources/work-verification-source.js";
-    string constant certificateExtractionSource =
+    string constant CERTIFICATE_EXTRACTION_SOURCE =
         "./functions/sources/certificate-extraction-source.js";
+    bytes constant DON_SECRETS_REFERENCE = "0x0";
 
     function run() external {
         IGetDWorkFactoryReturnTypes.GetDWorkFactoryReturnType
@@ -20,6 +21,7 @@ contract DeployDWorkFactory is Script {
         deployDWorkFactory(
             dWorkFactoryReturnType.functionsRouter,
             dWorkFactoryReturnType.donId,
+            dWorkFactoryReturnType.secretReference,
             dWorkFactoryReturnType.functionsSubId,
             dWorkFactoryReturnType.workVerificationSource,
             dWorkFactoryReturnType.certificateExtractionSource,
@@ -40,9 +42,9 @@ contract DeployDWorkFactory is Script {
             uint64 functionsSubId
         ) = helperConfig.activeNetworkConfig();
 
-        string memory verificationSource = vm.readFile(workVerificationSource);
+        string memory verificationSource = vm.readFile(WORK_VERIFIATION_SOURCE);
         string memory certificateSource = vm.readFile(
-            certificateExtractionSource
+            CERTIFICATE_EXTRACTION_SOURCE
         );
         if (
             functionsRouter == address(0) ||
@@ -57,6 +59,7 @@ contract DeployDWorkFactory is Script {
             IGetDWorkFactoryReturnTypes.GetDWorkFactoryReturnType(
                 functionsRouter,
                 donId,
+                DON_SECRETS_REFERENCE,
                 functionsSubId,
                 verificationSource,
                 certificateSource,
@@ -67,6 +70,7 @@ contract DeployDWorkFactory is Script {
     function deployDWorkFactory(
         address _functionsRouter,
         bytes32 _donId,
+        bytes memory _secretReference,
         uint64 _functionsSubId,
         string memory _workVerificationSource,
         string memory _certificateExtractionSource,
@@ -75,6 +79,7 @@ contract DeployDWorkFactory is Script {
         dWorkFactory newDWorkFactory = new dWorkFactory(
             _functionsRouter,
             _donId,
+            _secretReference,
             _functionsSubId,
             _workVerificationSource,
             _certificateExtractionSource,
