@@ -57,6 +57,7 @@ contract dWork is Ownable, ERC721, Pausable {
     TokenizedWork s_tokenizedWork;
 
     bool s_isMinted;
+    bool s_expectsWorkVerification;
     uint256 s_lastVerifiedAt;
     uint256 s_sharesTokenId;
 
@@ -95,6 +96,7 @@ contract dWork is Ownable, ERC721, Pausable {
     error dWork__NotEnoughTimePassedSinceLastVerification();
     error dWork__NotWorkOwner();
     error dWork__NotWorkVerifier();
+    error dWork__WorkVerificationNotExpected();
 
     //////////////////
     // Modifiers
@@ -203,14 +205,14 @@ contract dWork is Ownable, ERC721, Pausable {
     }
 
     /**
-     * @dev Fulfill the work verification, tiggered on WorkVerifier contract CF callback using log-based automation.
-     * @notice Called by Chainlink Log-based Automation
+     * @dev Fulfill the work verification, triggered on WorkVerifier contract CF callback using log-based automation.
+     * @notice Called by Chainlink Log-based Automation, when WorkVerificationDone event is emitted on WorkVerifier contract.
      */
     function fulfillWorkVerificationRequest()
         external
-        // TO-DO add control on over which conditions this function can be called
         verifyProcessOrder(VerificationStep.CertificateAnalysisDone)
     {
+        _ensureExpectsWorkVerification();
         _fulfillWorkVerificationRequest();
     }
 
@@ -279,6 +281,7 @@ contract dWork is Ownable, ERC721, Pausable {
         _args[3] = s_certificate.work;
 
         IWorkVerifier(i_workVerifier).sendWorkVerificationRequest(_args);
+        s_expectsWorkVerification = true;
         emit VerificationProcess(VerificationStep.PendingWorkVerification);
     }
 
@@ -349,6 +352,7 @@ contract dWork is Ownable, ERC721, Pausable {
         }
 
         s_lastVerifiedAt = block.timestamp;
+        s_expectsWorkVerification = false;
         emit VerificationProcess(s_verificationStep);
         emit ChainlinkResponse(
             workVerificationResponse.requestId,
@@ -452,6 +456,12 @@ contract dWork is Ownable, ERC721, Pausable {
             block.timestamp - s_lastVerifiedAt < MIN_VERIFICATION_INTERVAL
         ) {
             revert dWork__NotEnoughTimePassedSinceLastVerification();
+        }
+    }
+
+    function _ensureExpectsWorkVerification() internal view {
+        if (!s_expectsWorkVerification) {
+            revert dWork__WorkVerificationNotExpected();
         }
     }
 

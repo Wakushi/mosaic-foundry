@@ -212,7 +212,7 @@ contract WorkVerifier is FunctionsClient, Ownable {
                     response: response,
                     err: err
                 });
-            emit WorkVerificationDone(requestId, block.timestamp); // Add log-based automation on dWork.sol
+            emit WorkVerificationDone(requestId, block.timestamp);
         }
 
         s_lastResponse = response;
