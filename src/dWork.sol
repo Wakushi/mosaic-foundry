@@ -4,32 +4,26 @@ pragma solidity ^0.8.19;
 
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {FunctionsClient} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/FunctionsClient.sol";
-import {FunctionsRequest} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {OracleLib, AggregatorV3Interface} from "./libraries/OracleLib.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IDWorkConfig} from "./interfaces/IDWorkConfig.sol";
 import {IDWorkSharesManager} from "./interfaces/IDWorkSharesManager.sol";
+import {IWorkVerifier} from "./interfaces/IWorkVerifier.sol";
 
-contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
+contract dWork is Ownable, ERC721, Pausable {
     ///////////////////
     // Type declarations
     ///////////////////
 
-    using FunctionsRequest for FunctionsRequest.Request;
     using OracleLib for AggregatorV3Interface;
-
-    enum WorkCFRequestType {
-        WorkVerification,
-        CertificateExtraction
-    }
 
     enum VerificationStep {
         Pending,
         PendingCertificateAnalysis,
         CertificateAnalysisDone,
         PendingWorkVerification,
+        PendingTokenization,
         Tokenized
     }
 
@@ -38,14 +32,6 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         string work;
         uint256 year;
         string imageURL;
-    }
-
-    struct WorkCFRequest {
-        WorkCFRequestType requestType;
-        string customerSubmissionHash;
-        string appraiserReportHash;
-        string certificateImageHash;
-        uint256 timestamp;
     }
 
     struct TokenizedWork {
@@ -59,24 +45,10 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     // State variables
     ///////////////////
 
-    // Chainlink Functions
-    bytes32 s_donID;
-    uint32 s_gasLimit = 300000;
-    uint64 s_functionsSubId;
-    bytes s_secretReference;
-
-    string s_workVerificationSource;
-    string s_certificateExtractionSource;
-
-    bytes s_lastResponse;
-    bytes s_lastError;
-    bytes32 s_lastRequestId;
-
-    mapping(bytes32 requestId => WorkCFRequest request) private s_requestById;
-
-    // Work state
     uint256 constant MIN_VERIFICATION_INTERVAL = 30 days;
     address immutable i_workFactoryAddress;
+    address immutable i_workSharesManager;
+    address immutable i_workVerifier;
     string s_customerSubmissionIPFSHash;
     string s_lastAppraiserReportIPFSHash;
 
@@ -89,14 +61,15 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     uint256 s_sharesTokenId;
 
     address s_workOwner;
-    address immutable i_workSharesManager;
+
+    bytes s_lastVerifierResponse;
+    bytes s_lastVerifierError;
 
     ///////////////////
     // Events
     ///////////////////
 
     event WorkFractionalized(uint256 sharesTokenId);
-    event ChainlinkRequestSent(bytes32 requestId);
     event VerificationProcess(VerificationStep step);
     event CertificateExtracted(WorkCertificate certificate);
     event WorkTokenized(TokenizedWork tokenizedWork);
@@ -117,11 +90,11 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     ///////////////////
 
     error dWork__AlreadyMinted();
-    error dWork__UnexpectedRequestID(bytes32 requestId);
     error dWork__NotOwnerOrFactory();
     error dWork__ProcessOrderError();
     error dWork__NotEnoughTimePassedSinceLastVerification();
     error dWork__NotWorkOwner();
+    error dWork__NotWorkVerifier();
 
     //////////////////
     // Modifiers
@@ -147,28 +120,29 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         _;
     }
 
+    modifier onlyWorkVerifier() {
+        _ensureOnlyWorkVerifier();
+        _;
+    }
+
+    modifier verifyProcessOrder(VerificationStep _requiredStep) {
+        _ensureProcessOrder(_requiredStep);
+        _;
+    }
+
     //////////////////
     // Functions
     //////////////////
 
     constructor(
         IDWorkConfig.dWorkConfig memory _config
-    )
-        FunctionsClient(_config.functionsRouter)
-        Ownable(_config.owner)
-        ERC721(_config.workName, _config.workSymbol)
-    {
-        s_donID = _config.donId;
-        s_functionsSubId = _config.functionsSubId;
-        s_gasLimit = _config.gasLimit;
-        s_secretReference = _config.secretReference;
-        s_workVerificationSource = _config.workVerificationSource;
-        s_certificateExtractionSource = _config.certificateExtractionSource;
+    ) Ownable(_config.owner) ERC721(_config.workName, _config.workSymbol) {
         s_customerSubmissionIPFSHash = _config.customerSubmissionIPFSHash;
         s_lastAppraiserReportIPFSHash = _config.appraiserReportIPFSHash;
         s_workOwner = _config.customer;
         i_workFactoryAddress = _config.factoryAddress;
         i_workSharesManager = _config.workSharesManagerAddress;
+        i_workVerifier = _config.workVerifierAddress;
         s_verificationStep = VerificationStep.Pending;
     }
 
@@ -200,12 +174,44 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
      * Note: This function has to be called after the certificate extraction request is fulfilled, and then
      * will be called every month with the latest appraiser report using Chainlink Automation.
      */
-    function requestWorkVerification() external {
-        _ensureProcessOrder(VerificationStep.CertificateAnalysisDone);
+    function requestWorkVerification()
+        external
+        verifyProcessOrder(VerificationStep.CertificateAnalysisDone)
+    {
         if (isMinted()) {
             _ensureEnoughTimePassedSinceLastVerification();
         }
         _sendWorkVerificationRequest();
+    }
+
+    function fulfillCertificateExtractionRequest(
+        bytes32 requestId,
+        bytes memory response,
+        bytes memory err,
+        string memory certificateImageHash
+    )
+        external
+        onlyWorkVerifier
+        verifyProcessOrder(VerificationStep.PendingCertificateAnalysis)
+    {
+        _fullfillCertificateExtractionRequest(
+            requestId,
+            response,
+            err,
+            certificateImageHash
+        );
+    }
+
+    /**
+     * @dev Fulfill the work verification, tiggered on WorkVerifier contract CF callback using log-based automation.
+     * @notice Called by Chainlink Log-based Automation
+     */
+    function fulfillWorkVerificationRequest()
+        external
+        // TO-DO add control on over which conditions this function can be called
+        verifyProcessOrder(VerificationStep.CertificateAnalysisDone)
+    {
+        _fulfillWorkVerificationRequest();
     }
 
     function updateLastAppraiserReportIPFSHash(
@@ -219,20 +225,6 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     ) external onlyFactory whenNotPaused {
         s_sharesTokenId = _sharesTokenId;
         emit WorkFractionalized(_sharesTokenId);
-    }
-
-    function updateCFSubId(uint64 _subscriptionId) external onlyOwnerOrFactory {
-        s_functionsSubId = _subscriptionId;
-    }
-
-    function updateDonId(bytes32 _newDonId) external onlyOwnerOrFactory {
-        s_donID = _newDonId;
-    }
-
-    function updateSecretReference(
-        bytes calldata _secretReference
-    ) external onlyOwnerOrFactory {
-        s_secretReference = _secretReference;
     }
 
     // What happens if the work is approved to a different address?
@@ -273,106 +265,24 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     // Internal
     ////////////////////
 
-    function _sendCertificateExtractionRequest(
-        string[] calldata _args
-    ) internal returns (bytes32 requestId) {
-        s_lastRequestId = _generateSendRequest(
-            _args,
-            s_certificateExtractionSource
-        );
-        s_requestById[s_lastRequestId] = WorkCFRequest({
-            requestType: WorkCFRequestType.CertificateExtraction,
-            customerSubmissionHash: _args[0],
-            appraiserReportHash: "",
-            certificateImageHash: "",
-            timestamp: block.timestamp
-        });
+    function _sendCertificateExtractionRequest(string[] memory _args) internal {
         s_verificationStep = VerificationStep.PendingCertificateAnalysis;
+        IWorkVerifier(i_workVerifier).sendCertificateExtractionRequest(_args);
         emit VerificationProcess(VerificationStep.PendingCertificateAnalysis);
-        return s_lastRequestId;
     }
 
-    function _sendWorkVerificationRequest()
-        internal
-        returns (bytes32 requestId)
-    {
+    function _sendWorkVerificationRequest() internal {
         string[] memory _args = new string[](4);
         _args[0] = s_customerSubmissionIPFSHash;
         _args[1] = s_lastAppraiserReportIPFSHash;
         _args[2] = s_certificate.artist;
         _args[3] = s_certificate.work;
 
-        s_lastRequestId = _generateSendRequest(_args, s_workVerificationSource);
-        s_requestById[s_lastRequestId] = WorkCFRequest({
-            requestType: WorkCFRequestType.WorkVerification,
-            customerSubmissionHash: _args[0],
-            appraiserReportHash: _args[1],
-            certificateImageHash: "",
-            timestamp: block.timestamp
-        });
-        s_verificationStep = VerificationStep.PendingWorkVerification;
+        IWorkVerifier(i_workVerifier).sendWorkVerificationRequest(_args);
         emit VerificationProcess(VerificationStep.PendingWorkVerification);
-        return s_lastRequestId;
     }
 
-    function _generateSendRequest(
-        string[] memory args,
-        string memory source
-    ) internal returns (bytes32 requestId) {
-        FunctionsRequest.Request memory req;
-        req.initializeRequestForInlineJavaScript(source);
-        req.secretsLocation = FunctionsRequest.Location.DONHosted;
-        req.encryptedSecretsReference = s_secretReference;
-        if (args.length > 0) {
-            req.setArgs(args);
-        }
-
-        s_lastRequestId = _sendRequest(
-            req.encodeCBOR(),
-            s_functionsSubId,
-            s_gasLimit,
-            s_donID
-        );
-
-        emit ChainlinkRequestSent(s_lastRequestId);
-        return s_lastRequestId;
-    }
-
-    /**
-     *
-     * @param requestId Chainlink request ID
-     * @param response Response from the Chainlink DON
-     * @param err Error message from the Chainlink DON
-     * @dev Callback function to receive the response from the Chainlink DON after the work verification request
-     */
-    function fulfillRequest(
-        bytes32 requestId,
-        bytes memory response,
-        bytes memory err
-    ) internal override {
-        if (s_lastRequestId != requestId) {
-            revert dWork__UnexpectedRequestID(requestId);
-        }
-
-        WorkCFRequest storage request = s_requestById[requestId];
-
-        if (request.requestType == WorkCFRequestType.CertificateExtraction) {
-            _ensureProcessOrder(VerificationStep.PendingCertificateAnalysis);
-            _fulfillCertificateExtractionRequest(
-                requestId,
-                response,
-                err,
-                request.certificateImageHash
-            );
-        } else if (request.requestType == WorkCFRequestType.WorkVerification) {
-            _ensureProcessOrder(VerificationStep.PendingWorkVerification);
-            _fulfillWorkVerificationRequest(requestId, response, err);
-        }
-
-        s_lastResponse = response;
-    }
-
-    function _fulfillCertificateExtractionRequest(
+    function _fullfillCertificateExtractionRequest(
         bytes32 requestId,
         bytes memory response,
         bytes memory err,
@@ -384,8 +294,12 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         );
 
         if (bytes(artist).length == 0 || bytes(work).length == 0 || year == 0) {
-            s_lastError = err;
-            emit ChainlinkResponse(requestId, s_lastResponse, s_lastError);
+            s_lastVerifierError = err;
+            emit ChainlinkResponse(
+                requestId,
+                s_lastVerifierResponse,
+                s_lastVerifierError
+            );
             return;
         }
 
@@ -402,22 +316,29 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
         emit VerificationProcess(VerificationStep.CertificateAnalysisDone);
         emit CertificateExtracted(workCertificate);
-        emit ChainlinkResponse(requestId, s_lastResponse, s_lastError);
+        emit ChainlinkResponse(
+            requestId,
+            s_lastVerifierResponse,
+            s_lastVerifierError
+        );
     }
 
-    function _fulfillWorkVerificationRequest(
-        bytes32 requestId,
-        bytes memory response,
-        bytes memory err
-    ) internal {
+    function _fulfillWorkVerificationRequest() internal {
+        IDWorkConfig.WorkVerificationResponse
+            memory workVerificationResponse = IWorkVerifier(i_workVerifier)
+                .getLastWorkVerificationResponse();
         (string memory ownerName, uint256 priceUsd) = abi.decode(
-            response,
+            workVerificationResponse.response,
             (string, uint256)
         );
 
         if (priceUsd == 0) {
-            s_lastError = err;
-            emit ChainlinkResponse(requestId, s_lastResponse, s_lastError);
+            s_lastVerifierError = workVerificationResponse.err;
+            emit ChainlinkResponse(
+                workVerificationResponse.requestId,
+                s_lastVerifierResponse,
+                s_lastVerifierError
+            );
             return;
         }
 
@@ -428,9 +349,12 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         }
 
         s_lastVerifiedAt = block.timestamp;
-        s_verificationStep = VerificationStep.Tokenized;
-        emit VerificationProcess(VerificationStep.Tokenized);
-        emit ChainlinkResponse(requestId, s_lastResponse, s_lastError);
+        emit VerificationProcess(s_verificationStep);
+        emit ChainlinkResponse(
+            workVerificationResponse.requestId,
+            s_lastVerifierResponse,
+            s_lastVerifierError
+        );
     }
 
     /**
@@ -465,18 +389,19 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     }
 
     function _tokenizeWork(
-        string memory _ownerName,
-        uint256 _priceUsd
+        string memory _verifiedOwnerName,
+        uint256 _verifiedPriceUsd
     ) internal {
         _mintWork();
         TokenizedWork memory tokenizedWork;
         tokenizedWork = TokenizedWork({
             artist: s_certificate.artist,
             work: s_certificate.work,
-            ownerName: _ownerName,
-            workPriceUsd: _priceUsd
+            ownerName: _verifiedOwnerName,
+            workPriceUsd: _verifiedPriceUsd
         });
         s_tokenizedWork = tokenizedWork;
+        s_verificationStep = VerificationStep.Tokenized;
         emit WorkTokenized(tokenizedWork);
     }
 
@@ -506,6 +431,12 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     function _ensureOnlyFactory() internal view {
         if (msg.sender != i_workFactoryAddress) {
             revert dWork__NotOwnerOrFactory();
+        }
+    }
+
+    function _ensureOnlyWorkVerifier() internal view {
+        if (msg.sender != i_workVerifier) {
+            revert dWork__NotWorkVerifier();
         }
     }
 
@@ -544,28 +475,24 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         return s_workOwner;
     }
 
-    function getWorkVerificationSource() external view returns (string memory) {
-        return s_workVerificationSource;
-    }
-
-    function getSecretReference() external view returns (bytes memory) {
-        return s_secretReference;
-    }
-
     function getLastResponse() external view returns (bytes memory) {
-        return s_lastResponse;
+        return s_lastVerifierResponse;
     }
 
     function getLastError() external view returns (bytes memory) {
-        return s_lastError;
-    }
-
-    function getLastRequestId() external view returns (bytes32) {
-        return s_lastRequestId;
+        return s_lastVerifierError;
     }
 
     function getWorkFactoryAddress() external view returns (address) {
         return i_workFactoryAddress;
+    }
+
+    function getWorkSharesManagerAddress() external view returns (address) {
+        return i_workSharesManager;
+    }
+
+    function getWorkVerifierAddress() external view returns (address) {
+        return i_workVerifier;
     }
 
     function getCertificate() external view returns (WorkCertificate memory) {
@@ -602,13 +529,5 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     function getLastVerifiedAt() external view returns (uint256) {
         return s_lastVerifiedAt;
-    }
-
-    function getFunctionsSubId() external view returns (uint64) {
-        return s_functionsSubId;
-    }
-
-    function getDonId() external view returns (bytes32) {
-        return s_donID;
     }
 }

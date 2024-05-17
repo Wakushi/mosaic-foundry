@@ -11,4 +11,17 @@ interface IDWork {
     function getWorkPriceUsd() external view returns (uint256);
 
     function getWorkOwner() external view returns (address);
+
+    function fulfillCertificateExtractionRequest(
+        bytes32 requestId,
+        bytes memory response,
+        bytes memory err,
+        string memory certificateImageHash
+    ) external;
+
+    function fulfillWorkVerificationRequest(
+        bytes32 requestId,
+        bytes memory response,
+        bytes memory err
+    ) external;
 }

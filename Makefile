@@ -65,6 +65,9 @@ deployShares:
 deployFactory:
 	@forge script script/DeployDWorkFactory.s.sol:DeployDWorkFactory $(NETWORK_ARGS)
 
+deployVerifier:
+	@forge script script/DeployWorkVerifier.s.sol:DeployWorkVerifier $(NETWORK_ARGS)
+
 createSubscription:
 	@forge script script/Interactions.s.sol:CreateSubscription $(NETWORK_ARGS)
 

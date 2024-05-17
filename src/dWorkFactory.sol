@@ -13,19 +13,13 @@ contract dWorkFactory is Ownable {
     // State variables
     ///////////////////
 
-    address s_functionsRouter;
-    bytes32 s_donID;
-    uint64 s_functionsSubId;
-    uint32 constant GAS_LIMIT = 300000;
-    bytes s_secretReference;
-    string s_workVerificationSource;
-    string s_certificateExtractionSource;
-
     address s_priceFeed;
     address s_workSharesManager;
+    address s_workVerifier;
 
     mapping(address customer => address[] works) s_customerWorks;
     mapping(address workContract => uint256 workSharesTokenId) s_workShares;
+    mapping(address workContract => bool isWorkContract) s_workContracts;
 
     ///////////////////
     // Events
@@ -43,21 +37,13 @@ contract dWorkFactory is Ownable {
     error dWorkFactory__WrongWorkPrice();
 
     constructor(
-        address _functionsRouter,
-        bytes32 _donId,
-        bytes memory _secretReference,
-        uint64 _functionsSubId,
-        string memory _workVerificationSource,
-        string memory _certificateExtractionSource,
-        address _priceFeed
+        address _priceFeed,
+        address _workVerifier,
+        address _workSharesManager
     ) Ownable(msg.sender) {
-        s_functionsRouter = _functionsRouter;
-        s_donID = _donId;
-        s_secretReference = _secretReference;
-        s_functionsSubId = _functionsSubId;
-        s_workVerificationSource = _workVerificationSource;
-        s_certificateExtractionSource = _certificateExtractionSource;
         s_priceFeed = _priceFeed;
+        s_workVerifier = _workVerifier;
+        s_workSharesManager = _workSharesManager;
     }
 
     //////////////////
@@ -73,24 +59,19 @@ contract dWorkFactory is Ownable {
     ) external onlyOwner returns (address) {
         IDWorkConfig.dWorkConfig memory workConfig = IDWorkConfig.dWorkConfig({
             owner: owner(),
-            donId: s_donID,
-            functionsRouter: s_functionsRouter,
-            functionsSubId: s_functionsSubId,
-            gasLimit: GAS_LIMIT,
-            secretReference: s_secretReference,
-            workVerificationSource: s_workVerificationSource,
-            certificateExtractionSource: s_certificateExtractionSource,
             customerSubmissionIPFSHash: _customerSubmissionIPFSHash,
             appraiserReportIPFSHash: _appraiserReportIPFSHash,
             customer: _customer,
             workName: _workName,
             workSymbol: _workSymbol,
             factoryAddress: address(this),
-            workSharesManagerAddress: s_workSharesManager
+            workSharesManagerAddress: s_workSharesManager,
+            workVerifierAddress: s_workVerifier
         });
         dWork newWork = new dWork(workConfig);
         address newWorkAddress = address(newWork);
         s_customerWorks[_customer].push(newWorkAddress);
+        s_workContracts[newWorkAddress] = true;
         emit WorkDeployed(newWorkAddress, _customer);
         return newWorkAddress;
     }
@@ -134,10 +115,8 @@ contract dWorkFactory is Ownable {
         s_workSharesManager = _workSharesManager;
     }
 
-    function setSecretReference(
-        bytes memory _secretReference
-    ) external onlyOwner {
-        s_secretReference = _secretReference;
+    function setWorkVerifier(address _workVerifier) external onlyOwner {
+        s_workVerifier = _workVerifier;
     }
 
     //////////////////
@@ -158,5 +137,15 @@ contract dWorkFactory is Ownable {
 
     function getWorkSharesManager() external view returns (address) {
         return s_workSharesManager;
+    }
+
+    function getWorkVerifier() external view returns (address) {
+        return s_workVerifier;
+    }
+
+    function isWorkContract(
+        address _workContract
+    ) external view returns (bool) {
+        return s_workContracts[_workContract];
     }
 }
