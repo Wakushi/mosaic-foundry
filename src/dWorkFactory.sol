@@ -126,6 +126,12 @@ contract dWorkFactory is Ownable {
         emit WorkSharesCreated(sharesTokenId, _workContract);
     }
 
+    function setWorkSharesManager(
+        address _workSharesManager
+    ) external onlyOwner {
+        s_workSharesManager = _workSharesManager;
+    }
+
     //////////////////
     // External View
     ///////////////////
