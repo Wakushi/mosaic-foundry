@@ -46,7 +46,7 @@ contract HelperConfig is Script {
                 donId: bytes32("fun-base-sepolia-1"),
                 functionsRouter: 0xf9B8fc078197181C841c296C876945aaa425B278,
                 priceFeed: 0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1,
-                functionsSubId: 42
+                functionsSubId: 41
             });
     }
 

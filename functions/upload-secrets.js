@@ -38,7 +38,7 @@ const uploadSecrets = async () => {
 
   const encryptedSecretsObj = await secretsManager.encryptSecrets(secrets)
   const slotIdNumber = 0
-  const expirationTimeMinutes = 1440 // 24 hours
+  const expirationTimeMinutes = 2880 // 2 days
 
   console.log(
     `Upload encrypted secret to gateways ${gatewayUrls}. slotId ${slotIdNumber}. Expiration in minutes: ${expirationTimeMinutes}`

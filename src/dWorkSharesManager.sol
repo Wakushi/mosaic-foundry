@@ -119,7 +119,7 @@ contract dWorkSharesManager is ERC1155, Ownable {
         uint256 _sharesTokenId,
         uint256 _shareAmount
     ) external payable whenSharesNotPaused(_sharesTokenId) {
-        WorkShares storage workShares = s_workShares[_sharesTokenId];
+        WorkShares storage workShares = _ensureTokenIdExists(_sharesTokenId);
         if (
             workShares.totalShareBought + _shareAmount >
             workShares.maxShareSupply
@@ -189,6 +189,16 @@ contract dWorkSharesManager is ERC1155, Ownable {
     ////////////////////
     // Internal
     ////////////////////
+
+    function _ensureTokenIdExists(
+        uint256 _sharesTokenId
+    ) internal view returns (WorkShares storage) {
+        WorkShares storage workShares = s_workShares[_sharesTokenId];
+        if (workShares.workContract == address(0)) {
+            revert dWork__NotWorkContract();
+        }
+        return workShares;
+    }
 
     function _ensureOnlyWorkFactory() internal view {
         if (msg.sender != s_workFactoryAddress) {

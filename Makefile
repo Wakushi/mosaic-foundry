@@ -60,7 +60,7 @@ ifeq ($(findstring --network fuji,$(ARGS)),--network fuji)
 endif
 
 deployShares:
-	@forge script script/DeployDWorkShares.s.sol:DeployDWorkShares $(NETWORK_ARGS)
+	@forge script script/DeployDWorkSharesManager.s.sol:DeployDWorkSharesManager $(NETWORK_ARGS)
 
 deployFactory:
 	@forge script script/DeployDWorkFactory.s.sol:DeployDWorkFactory $(NETWORK_ARGS)

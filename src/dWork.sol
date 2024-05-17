@@ -63,7 +63,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     bytes32 s_donID;
     uint32 s_gasLimit = 300000;
     uint64 s_functionsSubId;
-    bytes public s_secretReference;
+    bytes s_secretReference;
 
     string s_workVerificationSource;
     string s_certificateExtractionSource;
@@ -85,7 +85,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     TokenizedWork s_tokenizedWork;
 
     bool s_isMinted;
-    uint256 lastVerifiedAt;
+    uint256 s_lastVerifiedAt;
     uint256 s_sharesTokenId;
 
     address s_workOwner;
@@ -182,7 +182,6 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
      *
      * @dev Extract the certificate of authenticity data from the scanned image using Chainlink Functions and OpenAI GPT-4o.
      * The certificate data includes the artist name, work name, and year of creation.
-     * Once request is fulfilled, the contract will automatically request the work verification.
      *
      * Note: This function can only be called once.
      */
@@ -198,8 +197,8 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
      * join the certificate data obtained by requestCertificateExtraction() and logitically verify the work.
      * Once the request is fulfilled, the contract will mint the work as an ERC721 token.
      *
-     * Note: This function will be called automatically after the certificate extraction request is fulfilled, and then
-     * every month with the latest appraiser report using Chainlink Automation.
+     * Note: This function has to be called after the certificate extraction request is fulfilled, and then
+     * will be called every month with the latest appraiser report using Chainlink Automation.
      */
     function requestWorkVerification() external {
         _ensureProcessOrder(VerificationStep.CertificateAnalysisDone);
@@ -277,14 +276,17 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     function _sendCertificateExtractionRequest(
         string[] calldata _args
     ) internal returns (bytes32 requestId) {
-        _generateSendRequest(_args, s_certificateExtractionSource);
-        s_requestById[s_lastRequestId] = WorkCFRequest(
-            WorkCFRequestType.CertificateExtraction,
-            "",
-            "",
-            _args[0],
-            block.timestamp
+        s_lastRequestId = _generateSendRequest(
+            _args,
+            s_certificateExtractionSource
         );
+        s_requestById[s_lastRequestId] = WorkCFRequest({
+            requestType: WorkCFRequestType.CertificateExtraction,
+            customerSubmissionHash: _args[0],
+            appraiserReportHash: "",
+            certificateImageHash: "",
+            timestamp: block.timestamp
+        });
         s_verificationStep = VerificationStep.PendingCertificateAnalysis;
         emit VerificationProcess(VerificationStep.PendingCertificateAnalysis);
         return s_lastRequestId;
@@ -300,14 +302,14 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         _args[2] = s_certificate.artist;
         _args[3] = s_certificate.work;
 
-        _generateSendRequest(_args, s_workVerificationSource);
-        s_requestById[s_lastRequestId] = WorkCFRequest(
-            WorkCFRequestType.WorkVerification,
-            _args[0],
-            _args[1],
-            "",
-            block.timestamp
-        );
+        s_lastRequestId = _generateSendRequest(_args, s_workVerificationSource);
+        s_requestById[s_lastRequestId] = WorkCFRequest({
+            requestType: WorkCFRequestType.WorkVerification,
+            customerSubmissionHash: _args[0],
+            appraiserReportHash: _args[1],
+            certificateImageHash: "",
+            timestamp: block.timestamp
+        });
         s_verificationStep = VerificationStep.PendingWorkVerification;
         emit VerificationProcess(VerificationStep.PendingWorkVerification);
         return s_lastRequestId;
@@ -388,17 +390,15 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         }
 
         WorkCertificate memory workCertificate;
-        workCertificate = WorkCertificate(
-            artist,
-            work,
-            year,
-            certificateImageHash
-        );
+        workCertificate = WorkCertificate({
+            artist: artist,
+            work: work,
+            year: year,
+            imageURL: certificateImageHash
+        });
 
         s_certificate = workCertificate;
         s_verificationStep = VerificationStep.CertificateAnalysisDone;
-
-        _sendWorkVerificationRequest();
 
         emit VerificationProcess(VerificationStep.CertificateAnalysisDone);
         emit CertificateExtracted(workCertificate);
@@ -427,6 +427,7 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
             _tokenizeWork(ownerName, priceUsd);
         }
 
+        s_lastVerifiedAt = block.timestamp;
         s_verificationStep = VerificationStep.Tokenized;
         emit VerificationProcess(VerificationStep.Tokenized);
         emit ChainlinkResponse(requestId, s_lastResponse, s_lastError);
@@ -516,8 +517,8 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
 
     function _ensureEnoughTimePassedSinceLastVerification() internal view {
         if (
-            lastVerifiedAt != 0 &&
-            block.timestamp - lastVerifiedAt < MIN_VERIFICATION_INTERVAL
+            s_lastVerifiedAt != 0 &&
+            block.timestamp - s_lastVerifiedAt < MIN_VERIFICATION_INTERVAL
         ) {
             revert dWork__NotEnoughTimePassedSinceLastVerification();
         }
@@ -596,6 +597,14 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
     }
 
     function getLastVerifiedAt() external view returns (uint256) {
-        return lastVerifiedAt;
+        return s_lastVerifiedAt;
+    }
+
+    function getFunctionsSubId() external view returns (uint64) {
+        return s_functionsSubId;
+    }
+
+    function getDonId() external view returns (bytes32) {
+        return s_donID;
     }
 }

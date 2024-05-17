@@ -5,7 +5,7 @@ import {Script} from "forge-std/Script.sol";
 import {HelperConfig} from "./HelperConfig.s.sol";
 import {dWorkSharesManager} from "../src/dWorkSharesManager.sol";
 
-contract DeployDWorkShare is Script {
+contract DeployDWorkSharesManager is Script {
     string constant BASE_URI =
         "https://peach-genuine-lamprey-766.mypinata.cloud/ipfs/";
 

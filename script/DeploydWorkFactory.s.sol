@@ -11,7 +11,8 @@ contract DeployDWorkFactory is Script {
         "./functions/sources/work-verification-source.js";
     string constant CERTIFICATE_EXTRACTION_SOURCE =
         "./functions/sources/certificate-extraction-source.js";
-    bytes constant DON_SECRETS_REFERENCE = "0x0";
+    bytes constant DON_SECRETS_REFERENCE =
+        hex"a266736c6f744964006776657273696f6e1a6646a821";
 
     function run() external {
         IGetDWorkFactoryReturnTypes.GetDWorkFactoryReturnType
