@@ -536,6 +536,10 @@ contract dWork is FunctionsClient, Ownable, ERC721, Pausable {
         return s_sharesTokenId != 0;
     }
 
+    function getWorkPriceUsd() external view returns (uint256) {
+        return s_tokenizedWork.workPriceUsd;
+    }
+
     function getWorkOwner() external view returns (address) {
         return s_workOwner;
     }

@@ -155,4 +155,8 @@ contract dWorkFactory is Ownable {
     ) external view returns (uint256) {
         return s_workShares[_workContract];
     }
+
+    function getWorkSharesManager() external view returns (address) {
+        return s_workSharesManager;
+    }
 }
