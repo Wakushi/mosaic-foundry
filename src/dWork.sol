@@ -10,8 +10,9 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IDWorkConfig} from "./interfaces/IDWorkConfig.sol";
 import {IDWorkSharesManager} from "./interfaces/IDWorkSharesManager.sol";
 import {IWorkVerifier} from "./interfaces/IWorkVerifier.sol";
+import {Log, ILogAutomation} from "@chainlink/contracts/src/v0.8/automation/interfaces/ILogAutomation.sol";
 
-contract dWork is Ownable, ERC721, Pausable {
+contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
     ///////////////////
     // Type declarations
     ///////////////////
@@ -209,7 +210,7 @@ contract dWork is Ownable, ERC721, Pausable {
      * @notice Called by Chainlink Log-based Automation, when WorkVerificationDone event is emitted on WorkVerifier contract.
      */
     function fulfillWorkVerificationRequest()
-        external
+        public
         verifyProcessOrder(VerificationStep.CertificateAnalysisDone)
     {
         _ensureExpectsWorkVerification();
@@ -261,6 +262,22 @@ contract dWork is Ownable, ERC721, Pausable {
     ) public override whenNotPaused onlyWorkOwner {
         super.safeTransferFrom(from, to, tokenId, data);
         s_workOwner = to;
+    }
+
+    function checkLog(
+        Log calldata log,
+        bytes memory
+    ) external view returns (bool upkeepNeeded, bytes memory performData) {
+        address workRequester = bytes32ToAddress(log.topics[1]);
+        upkeepNeeded = workRequester == address(this);
+        performData = abi.encode(workRequester);
+    }
+
+    function performUpkeep(bytes calldata performData) external override {
+        address workRequester = abi.decode(performData, (address));
+        if (workRequester == address(this)) {
+            fulfillWorkVerificationRequest();
+        }
     }
 
     ////////////////////
@@ -539,5 +556,9 @@ contract dWork is Ownable, ERC721, Pausable {
 
     function getLastVerifiedAt() external view returns (uint256) {
         return s_lastVerifiedAt;
+    }
+
+    function bytes32ToAddress(bytes32 _address) public pure returns (address) {
+        return address(uint160(uint256(_address)));
     }
 }

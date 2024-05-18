@@ -3,9 +3,9 @@ const ethers = require("ethers")
 require("@chainlink/env-enc").config()
 
 const uploadSecrets = async () => {
-  // hardcoded for Base Sepolia DON
-  const routerAddress = "0xf9B8fc078197181C841c296C876945aaa425B278"
-  const donId = "fun-base-sepolia-1"
+  // hardcoded for Polygon Amoy DON
+  const routerAddress = "0xC22a79eBA640940ABB6dF0f7982cc119578E11De"
+  const donId = "fun-polygon-amoy-1"
   const gatewayUrls = [
     "https://01.functions-gateway.testnet.chain.link/",
     "https://02.functions-gateway.testnet.chain.link/",
@@ -17,7 +17,7 @@ const uploadSecrets = async () => {
       "private key not provided - check your environment variables"
     )
 
-  const rpcUrl = process.env.BASE_SEPOLIA_RPC_URL
+  const rpcUrl = process.env.POLYGON_AMOY_RPC_URL
 
   if (!rpcUrl)
     throw new Error(`rpcUrl not provided  - check your environment variables`)

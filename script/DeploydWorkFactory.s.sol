@@ -7,8 +7,8 @@ import {dWorkFactory} from "../src/dWorkFactory.sol";
 import {IGetWorkVerifierReturnTypes} from "../src/interfaces/IGetWorkVerifierReturnTypes.sol";
 
 contract DeployDWorkFactory is Script {
-    address workVerifier = 0x8a6aBe1ed2bE7EA85391039c19178eF9c480c1E9;
-    address workSharesManager = 0xb4F885259EA241973960C4910254d417b73a6A80;
+    address workVerifier = 0x486Bc902b120741Dff8563d0462af105F49598db;
+    address workSharesManager = 0x0bbc414f42DB6Ad35eEF14c553c49B63e368E965;
 
     function run() external returns (dWorkFactory) {
         HelperConfig helperConfig = new HelperConfig();

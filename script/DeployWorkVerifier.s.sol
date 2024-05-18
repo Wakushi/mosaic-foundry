@@ -5,6 +5,7 @@ import {Script} from "forge-std/Script.sol";
 import {HelperConfig} from "./HelperConfig.s.sol";
 import {WorkVerifier} from "../src/WorkVerifier.sol";
 import {IGetWorkVerifierReturnTypes} from "../src/interfaces/IGetWorkVerifierReturnTypes.sol";
+import {IFunctionsSubscriptions} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/interfaces/IFunctionsSubscriptions.sol";
 
 contract DeployWorkVerifier is Script {
     string constant WORK_VERIFIATION_SOURCE =
@@ -12,14 +13,14 @@ contract DeployWorkVerifier is Script {
     string constant CERTIFICATE_EXTRACTION_SOURCE =
         "./functions/sources/certificate-extraction-source.js";
     bytes constant DON_SECRETS_REFERENCE =
-        hex"a266736c6f744964006776657273696f6e1a66475a44";
+        hex"a266736c6f744964006776657273696f6e1a6648d70e";
 
     function run() external {
         IGetWorkVerifierReturnTypes.GetWorkVerifierReturnType
             memory workVerifierReturnType = getWorkVerifierRequirements();
 
         vm.startBroadcast();
-        deployWorkVerifier(
+        address newWorkVerifier = deployWorkVerifier(
             workVerifierReturnType.functionsRouter,
             workVerifierReturnType.donId,
             workVerifierReturnType.functionsSubId,
@@ -27,6 +28,11 @@ contract DeployWorkVerifier is Script {
             workVerifierReturnType.workVerificationSource,
             workVerifierReturnType.certificateExtractionSource
         );
+        IFunctionsSubscriptions(workVerifierReturnType.functionsRouter)
+            .addConsumer(
+                workVerifierReturnType.functionsSubId,
+                newWorkVerifier
+            );
         vm.stopBroadcast();
     }
 
@@ -72,7 +78,7 @@ contract DeployWorkVerifier is Script {
         bytes memory _secretReference,
         string memory _workVerificationSource,
         string memory _certificateExtractionSource
-    ) public returns (WorkVerifier) {
+    ) public returns (address) {
         WorkVerifier newWorkVerifier = new WorkVerifier(
             _functionsRouter,
             _donId,
@@ -81,6 +87,6 @@ contract DeployWorkVerifier is Script {
             _workVerificationSource,
             _certificateExtractionSource
         );
-        return newWorkVerifier;
+        return address(newWorkVerifier);
     }
 }

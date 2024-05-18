@@ -21,13 +21,27 @@ contract HelperConfig is Script {
     NetworkConfig public activeNetworkConfig;
 
     constructor() {
-        if (block.chainid == 80002) {
+        if (block.chainid == 11155111) {
+            activeNetworkConfig = getSepoliaEthConfig();
+        } else if (block.chainid == 80002) {
             activeNetworkConfig = getPolygonAmoyConfig();
         } else if (block.chainid == 84532) {
             activeNetworkConfig = getBaseSepoliaConfig();
+        } else if (block.chainid == 421614) {
+            activeNetworkConfig = getArbitrumSepoliaConfig();
         } else {
             activeNetworkConfig = getOrCreateAnvilEthConfig();
         }
+    }
+
+    function getSepoliaEthConfig() public pure returns (NetworkConfig memory) {
+        return
+            NetworkConfig({
+                donId: bytes32("fun-ethereum-sepolia-1"),
+                functionsRouter: 0xb83E47C2bC239B3bf370bc41e1459A34b41238D0,
+                priceFeed: 0x694AA1769357215DE4FAC081bf1f309aDC325306,
+                functionsSubId: 2755
+            });
     }
 
     function getPolygonAmoyConfig() public pure returns (NetworkConfig memory) {
@@ -36,7 +50,21 @@ contract HelperConfig is Script {
                 donId: bytes32("fun-polygon-amoy-1"),
                 functionsRouter: 0xC22a79eBA640940ABB6dF0f7982cc119578E11De,
                 priceFeed: 0xF0d50568e3A7e8259E16663972b11910F89BD8e7,
-                functionsSubId: 41
+                functionsSubId: 212
+            });
+    }
+
+    function getArbitrumSepoliaConfig()
+        public
+        pure
+        returns (NetworkConfig memory)
+    {
+        return
+            NetworkConfig({
+                donId: bytes32("fun-arbitrum-sepolia-1"),
+                functionsRouter: 0x234a5fb5Bd614a7AA2FfAB244D603abFA0Ac5C5C,
+                priceFeed: 0xd30e2101a97dcbAeBCBC04F14C3f624E67A35165,
+                functionsSubId: 65
             });
     }
 

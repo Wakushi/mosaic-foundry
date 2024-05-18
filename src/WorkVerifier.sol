@@ -58,6 +58,7 @@ contract WorkVerifier is FunctionsClient, Ownable {
 
     event ChainlinkRequestSent(bytes32 requestId);
     event WorkVerificationDone(
+        address indexed workRequester,
         bytes32 indexed requestId,
         uint256 indexed timestamp
     );
@@ -212,7 +213,11 @@ contract WorkVerifier is FunctionsClient, Ownable {
                     response: response,
                     err: err
                 });
-            emit WorkVerificationDone(requestId, block.timestamp);
+            emit WorkVerificationDone(
+                request.workRequester,
+                requestId,
+                block.timestamp
+            );
         }
 
         s_lastResponse = response;

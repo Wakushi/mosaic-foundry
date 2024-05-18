@@ -36,15 +36,11 @@ anvil :; anvil -m 'test test test test test test test test test test test junk' 
 NETWORK_ARGS := --rpc-url http://localhost:8545 --private-key $(DEFAULT_ANVIL_KEY) --broadcast
 
 ifeq ($(findstring --network sepolia,$(ARGS)),--network sepolia)
-	NETWORK_ARGS := --rpc-url $(SEPOLIA_RPC_URL) --private-key $(PRIVATE_KEY) --broadcast --verify --etherscan-api-key $(ETHERSCAN_API_KEY) -vvvv
+	NETWORK_ARGS := --rpc-url $(ETHEREUM_SEPOLIA_RPC_URL) --private-key $(PRIVATE_KEY) --broadcast --verify --etherscan-api-key $(ETHERSCAN_API_KEY) -vvvv
 endif
 
-ifeq ($(findstring --network mumbai,$(ARGS)),--network mumbai)
-	NETWORK_ARGS := --rpc-url $(POLYGON_MUMBAI_RPC_URL) --private-key $(PRIVATE_KEY) --broadcast --verify --etherscan-api-key $(POLYGONSCAN_API_KEY) -vvvv
-endif
-
-ifeq ($(findstring --network optimism,$(ARGS)),--network optimism)
-	NETWORK_ARGS := --rpc-url $(SEPOLIA_OPTIMISM_RPC_URL) --private-key $(PRIVATE_KEY) --broadcast --verify --etherscan-api-key $(OPTIMISTIC_ETHERSCAN_API_KEY) -vvvv
+ifeq ($(findstring --network amoy,$(ARGS)),--network amoy)
+	NETWORK_ARGS := --rpc-url $(POLYGON_AMOY_RPC_URL) --private-key $(PRIVATE_KEY) --broadcast -vvvv
 endif
 
 ifeq ($(findstring --network arbitrum,$(ARGS)),--network arbitrum)
@@ -55,9 +51,6 @@ ifeq ($(findstring --network base,$(ARGS)),--network base)
 	NETWORK_ARGS := --rpc-url $(BASE_SEPOLIA_RPC_URL) --private-key $(PRIVATE_KEY) --broadcast --verify --etherscan-api-key $(BASE_ETHERSCAN_API_KEY) -vvvv
 endif
 
-ifeq ($(findstring --network fuji,$(ARGS)),--network fuji)
-	NETWORK_ARGS := --rpc-url $(FUJI_RPC_URL) --private-key $(PRIVATE_KEY) --broadcast --verifier-url 'https://api.routescan.io/v2/network/testnet/evm/43113/etherscan' --etherscan-api-key "verifyContract" -vvvv
-endif
 
 deployShares:
 	@forge script script/DeployDWorkSharesManager.s.sol:DeployDWorkSharesManager $(NETWORK_ARGS)

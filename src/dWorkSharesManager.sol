@@ -96,7 +96,7 @@ contract dWorkSharesManager is ERC1155, Ownable {
             ++s_tokenId;
         }
 
-        _mint(_workOwner, _shareSupply, s_tokenId, "");
+        _mint(_workOwner, s_tokenId, _shareSupply, "");
 
         s_workShares[s_tokenId] = WorkShares({
             maxShareSupply: _shareSupply,
