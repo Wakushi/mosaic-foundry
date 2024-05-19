@@ -156,11 +156,10 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
     /**
      *
      * @param _args [CERTIFICATE IMAGE IPFS HASH]
-     *
-     * @dev Extract the certificate of authenticity data from the scanned image using Chainlink Functions and OpenAI GPT-4o.
-     * The certificate data includes the artist name, work name, and year of creation.
-     *
-     * Note: This function can only be called once.
+     * @notice Request the certificate data extraction from the scanned image.
+     * @dev Tasks the WorkVerifier contract to extract the image data using OpenAI GPT-4o through Chainlink Functions.
+     * Once fulfilled on WorkVerifier, it will call back the fulfillCertificateExtractionRequest() function on this contract.
+     * Note: This function can only be called as long as the work is not minted.
      */
     function requestCertificateExtraction(
         string[] calldata _args
@@ -169,10 +168,11 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
     }
 
     /**
-     * @dev Request the work verification using Chainlink Functions and OpenAI GPT-4o.
+     * @notice Request the work verification using all aggregated data.
+     * @dev Tasks the WorkVerifier contract to fetch and organize all data sources using OpenAI GPT-4o through Chainlink Functions.
      * This request will fetch the data from the customer submission, the appraiser report and global market data,
-     * join the certificate data obtained by requestCertificateExtraction() and logitically verify the work.
-     * Once the request is fulfilled, the contract will mint the work as an ERC721 token.
+     * join the certificate data obtained by requestCertificateExtraction() and logically verify the work.
+     * Once the request is fulfilled, the fulfillWorkVerificationRequest() function will be called on this contract to mint the work as an ERC721 token.
      *
      * Note: This function has to be called after the certificate extraction request is fulfilled, and then
      * will be called every month with the latest appraiser report using Chainlink Automation.
@@ -187,6 +187,14 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
         _sendWorkVerificationRequest();
     }
 
+    /**
+     * @param requestId The Chainlink request ID.
+     * @param response The response data from the Chainlink node.
+     * @param err The error message from the Chainlink node.
+     * @param certificateImageHash The IPFS hash of the certificate image.
+     * @notice Registers the data extracted from the certificate of authenticity on this contract.
+     * @dev This function can only be called by the WorkVerifier contract, after the certificate extraction request is fulfilled.
+     */
     function fulfillCertificateExtractionRequest(
         bytes32 requestId,
         bytes memory response,
@@ -206,8 +214,8 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
     }
 
     /**
-     * @dev Fulfill the work verification, triggered on WorkVerifier contract CF callback using log-based automation.
-     * @notice Called by Chainlink Log-based Automation, when WorkVerificationDone event is emitted on WorkVerifier contract.
+     * @notice Fulfill the work verification request by minting the work as an ERC721 token.
+     * @dev Called by Chainlink Log-based Automation, when WorkVerificationDone event is emitted on WorkVerifier contract.
      */
     function fulfillWorkVerificationRequest()
         public
@@ -217,12 +225,23 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
         _fulfillWorkVerificationRequest();
     }
 
+    /**
+     *
+     * @param _newAppraiserReportIPFSHash The IPFS hash of the latest appraiser report.
+     * @notice Update the IPFS hash of the latest appraiser report.
+     */
     function updateLastAppraiserReportIPFSHash(
         string calldata _newAppraiserReportIPFSHash
     ) external onlyOwnerOrFactory {
         s_lastAppraiserReportIPFSHash = _newAppraiserReportIPFSHash;
     }
 
+    /**
+     *
+     * @param _sharesTokenId The ERC1155 token ID of the work shares.
+     * @dev Set the ERC1155 token ID of the shares tokens associated with this work.
+     * This function can only be called by the factory contract after calling its createWorkShares() function.
+     */
     function setWorkSharesTokenId(
         uint256 _sharesTokenId
     ) external onlyFactory whenNotPaused {
@@ -230,7 +249,30 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
         emit WorkFractionalized(_sharesTokenId);
     }
 
-    // What happens if the work is approved to a different address?
+    /**
+     * @dev Triggered using Chainlink log-based Automation once a WorkVerificationDone event is emitted by
+     * the WorkVerifier contract. It confirms that the work verification is needed and that performUpkeep() should be called.
+     */
+    function checkLog(
+        Log calldata log,
+        bytes memory
+    ) external view returns (bool upkeepNeeded, bytes memory performData) {
+        address workRequester = bytes32ToAddress(log.topics[1]);
+        upkeepNeeded = workRequester == address(this);
+        performData = abi.encode(workRequester);
+    }
+
+    /**
+     * @dev Called by Chainlink log-based Automation to fulfill the work verification request.
+     * It should be triggered by when the WorkVerificationDone event is emitted by the WorkVerifier contract.
+     */
+    function performUpkeep(bytes calldata performData) external override {
+        address workRequester = abi.decode(performData, (address));
+        if (workRequester == address(this)) {
+            fulfillWorkVerificationRequest();
+        }
+    }
+
     function approve(
         address to,
         uint256 tokenId
@@ -262,22 +304,6 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
     ) public override whenNotPaused onlyWorkOwner {
         super.safeTransferFrom(from, to, tokenId, data);
         s_workOwner = to;
-    }
-
-    function checkLog(
-        Log calldata log,
-        bytes memory
-    ) external view returns (bool upkeepNeeded, bytes memory performData) {
-        address workRequester = bytes32ToAddress(log.topics[1]);
-        upkeepNeeded = workRequester == address(this);
-        performData = abi.encode(workRequester);
-    }
-
-    function performUpkeep(bytes calldata performData) external override {
-        address workRequester = abi.decode(performData, (address));
-        if (workRequester == address(this)) {
-            fulfillWorkVerificationRequest();
-        }
     }
 
     ////////////////////

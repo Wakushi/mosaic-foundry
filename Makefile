@@ -51,7 +51,6 @@ ifeq ($(findstring --network base,$(ARGS)),--network base)
 	NETWORK_ARGS := --rpc-url $(BASE_SEPOLIA_RPC_URL) --private-key $(PRIVATE_KEY) --broadcast --verify --etherscan-api-key $(BASE_ETHERSCAN_API_KEY) -vvvv
 endif
 
-
 deployShares:
 	@forge script script/DeployDWorkSharesManager.s.sol:DeployDWorkSharesManager $(NETWORK_ARGS)
 
