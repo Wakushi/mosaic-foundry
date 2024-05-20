@@ -160,7 +160,6 @@ contract dWork is
     ////////////////////
 
     /**
-     *
      * @param _customerSubmissionIPFSHash The IPFS hash of the customer submission.
      * @param _appraiserReportIPFSHash The IPFS hash of the appraiser report.
      * @param _certificateIPFSHash The IPFS hash of the certificate image.
@@ -233,6 +232,14 @@ contract dWork is
         _sendWorkVerificationRequest(_tokenizationRequestId);
     }
 
+    /**
+     * @param _tokenizationRequestId The ID of the tokenization request.
+     * @param _shareSupply The total supply of the shares tokens.
+     * @param _sharePriceUsd The price of each share token in USD.
+     * @notice Fractionalize a work of art into shares tokens.
+     * @dev Tasks the WorkSharesManager contract to create ERC1155 shares tokens for the work.
+     * This function can only be called after the work has been minted as an ERC721 token.
+     */
     function createWorkShares(
         uint256 _tokenizationRequestId,
         uint256 _shareSupply,
@@ -270,7 +277,6 @@ contract dWork is
     }
 
     /**
-     *
      * @param _newAppraiserReportIPFSHash The IPFS hash of the latest appraiser report.
      * @notice Update the IPFS hash of the latest appraiser report.
      */
@@ -283,7 +289,6 @@ contract dWork is
     }
 
     /**
-     *
      * @param _sharesTokenId The ERC1155 token ID of the work shares.
      * @dev Set the ERC1155 token ID of the shares tokens associated with this work.
      * This function can only be called by the factory contract after calling its createWorkShares() function.
@@ -594,6 +599,18 @@ contract dWork is
     // External / Public View
     ////////////////////
 
+    function getLastTokenizationRequestId() public view returns (uint256) {
+        return s_tokenizationRequestId;
+    }
+
+    function getLastTokenId() public view returns (uint256) {
+        return s_tokenId;
+    }
+
+    function getLastPerformData() public view returns (bytes memory) {
+        return s_lastPerformData;
+    }
+
     function getTokenizationRequest(
         uint256 _tokenizationRequestId
     ) public view returns (TokenizationRequest memory) {
@@ -606,8 +623,10 @@ contract dWork is
         return s_tokenizationRequests[_tokenizationRequestId].verificationStep;
     }
 
-    function getLastTokenId() public view returns (uint256) {
-        return s_tokenId;
+    function customerTokenizationRequests(
+        address _customer
+    ) public view returns (uint256[] memory) {
+        return s_customerTokenizationRequests[_customer];
     }
 
     function getSharesTokenId(
@@ -616,20 +635,14 @@ contract dWork is
         return s_sharesTokenIds[_tokenizationRequestId];
     }
 
-    function getWorkSharesManager() public view returns (address) {
-        return s_workSharesManager;
-    }
-
     function getTokenizationRequestByWorkTokenId(
         uint256 _workTokenId
     ) public view returns (TokenizationRequest memory) {
         return s_tokenById[_workTokenId];
     }
 
-    function customerTokenizationRequests(
-        address _customer
-    ) public view returns (uint256[] memory) {
-        return s_customerTokenizationRequests[_customer];
+    function getWorkSharesManager() public view returns (address) {
+        return s_workSharesManager;
     }
 
     function getWorkVerifier() public view returns (address) {
@@ -642,10 +655,6 @@ contract dWork is
 
     function getLastVerifierError() public view returns (bytes memory) {
         return s_lastVerifierError;
-    }
-
-    function getLastTokenizationRequestId() public view returns (uint256) {
-        return s_tokenizationRequestId;
     }
 
     function isMinted(

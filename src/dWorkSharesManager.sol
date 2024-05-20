@@ -405,6 +405,22 @@ contract dWorkSharesManager is ERC1155, Ownable {
         return s_workShares[_sharesTokenId];
     }
 
+    function getLastMarketShareItemId() external view returns (uint256) {
+        return s_marketShareItemId;
+    }
+
+    function getMarketShareItemById(
+        uint256 _marketShareItemId
+    ) external view returns (MarketShareItem memory) {
+        return s_marketShareItems[_marketShareItemId];
+    }
+
+    function getMarketShareItemIndex(
+        uint256 _marketShareItemId
+    ) external view returns (uint256) {
+        return s_listedShareItemIndex[_marketShareItemId];
+    }
+
     function getNativeTokenPriceUsd() external view returns (uint256) {
         (, int256 answer, , , ) = s_priceFeed.latestRoundData();
         return uint256(answer * 10000000000);

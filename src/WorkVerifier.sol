@@ -35,12 +35,10 @@ contract WorkVerifier is FunctionsClient, Ownable {
     bytes32 s_lastRequestId;
     address s_dWork;
 
+    mapping(uint256 tokenizationRequestId => WorkCFRequestType requestType) s_tokenizationRequestType;
+    mapping(uint256 tokenizationRequestId => IDWorkConfig.VerifiedWorkData lastVerifiedData) s_lastVerifiedData;
     mapping(bytes32 requestId => uint256 tokenizationRequestId)
         private s_tokenizationRequestIdByCFRequestId;
-
-    mapping(uint256 tokenizationRequestId => WorkCFRequestType requestType) s_tokenizationRequestType;
-
-    mapping(uint256 tokenizationRequestId => IDWorkConfig.VerifiedWorkData lastVerifiedData) s_lastVerifiedData;
 
     ///////////////////
     // Events
