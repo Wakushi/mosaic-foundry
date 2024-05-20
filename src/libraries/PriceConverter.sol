@@ -12,11 +12,12 @@ library PriceConverter {
     }
 
     function getConversionRate(
-        uint256 ethAmount,
+        uint256 _nativeTokenAmount,
         AggregatorV3Interface priceFeed
     ) internal view returns (uint256) {
-        uint256 ethPrice = getPrice(priceFeed);
-        uint256 ethAmountInUsd = (ethPrice * ethAmount) / 1000000000000000000;
-        return ethAmountInUsd;
+        uint256 nativeTokenPriceUsd = getPrice(priceFeed);
+        uint256 nativeTokenAmountInUsd = (nativeTokenPriceUsd *
+            _nativeTokenAmount) / 1000000000000000000;
+        return nativeTokenAmountInUsd;
     }
 }

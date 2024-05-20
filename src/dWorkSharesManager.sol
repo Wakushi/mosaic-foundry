@@ -13,7 +13,7 @@ contract dWorkSharesManager is ERC1155, Ownable {
     struct WorkShares {
         uint256 maxShareSupply;
         uint256 sharePriceUsd;
-        address workContract;
+        uint256 workTokenId;
         uint256 totalShareBought;
         uint256 totalSellValueUsd;
         address workOwner;
@@ -26,11 +26,11 @@ contract dWorkSharesManager is ERC1155, Ownable {
 
     // Chainlink Data Feed
     AggregatorV3Interface private s_priceFeed;
-    address s_workFactoryAddress;
+    address s_dWork;
     uint256 s_tokenId;
 
     mapping(uint256 sharesTokenId => WorkShares workShares) s_workShares;
-    mapping(address workContract => uint256 sharesTokenId) s_sharesTokenIds;
+    mapping(uint256 workTokenId => uint256 sharesTokenId) s_sharesTokenIdByWorkId;
 
     ///////////////////
     // Events
@@ -39,7 +39,7 @@ contract dWorkSharesManager is ERC1155, Ownable {
     event SharesCreated(
         uint256 sharesTokenId,
         uint256 maxShareSupply,
-        address workContract,
+        uint256 workTokenId,
         address workOwner
     );
     event ShareBought(uint256 sharesTokenId, uint256 amount, address buyer);
@@ -52,12 +52,17 @@ contract dWorkSharesManager is ERC1155, Ownable {
     error dWorkShare__InsufficientFunds();
     error dWorkShare__InitialSaleClosed();
     error dWork__NotWorkContract();
-    error dWork__NotFactoryContract();
     error dWork__SharesPaused();
+    error dWork__TokenIdDoesNotExist();
 
     //////////////////
     // Modifiers
     //////////////////
+
+    modifier onlyDWork() {
+        _ensureOnlydWork();
+        _;
+    }
 
     modifier whenSharesNotPaused(uint256 _sharesTokenId) {
         _ensureSharesNotPaused(_sharesTokenId);
@@ -85,12 +90,12 @@ contract dWorkSharesManager is ERC1155, Ownable {
     ////////////////////
 
     function createShares(
-        address _workContract,
+        uint256 _workTokenId,
         address _workOwner,
         uint256 _shareSupply,
         uint256 _sharePriceUsd
     ) external returns (uint256) {
-        _ensureOnlyWorkFactory();
+        _ensureOnlydWork();
 
         unchecked {
             ++s_tokenId;
@@ -101,16 +106,16 @@ contract dWorkSharesManager is ERC1155, Ownable {
         s_workShares[s_tokenId] = WorkShares({
             maxShareSupply: _shareSupply,
             sharePriceUsd: _sharePriceUsd,
-            workContract: _workContract,
+            workTokenId: _workTokenId,
             totalShareBought: 0,
             totalSellValueUsd: 0,
             workOwner: _workOwner,
             isPaused: false
         });
 
-        s_sharesTokenIds[_workContract] = s_tokenId;
+        s_sharesTokenIdByWorkId[_workTokenId] = s_tokenId;
 
-        emit SharesCreated(s_tokenId, _shareSupply, _workContract, _workOwner);
+        emit SharesCreated(s_tokenId, _shareSupply, _workTokenId, _workOwner);
 
         return s_tokenId;
     }
@@ -119,7 +124,12 @@ contract dWorkSharesManager is ERC1155, Ownable {
         uint256 _sharesTokenId,
         uint256 _shareAmount
     ) external payable whenSharesNotPaused(_sharesTokenId) {
-        WorkShares storage workShares = _ensureTokenIdExists(_sharesTokenId);
+        if (_sharesTokenId == 0) {
+            revert dWork__TokenIdDoesNotExist();
+        }
+
+        WorkShares storage workShares = s_workShares[_sharesTokenId];
+
         if (
             workShares.totalShareBought + _shareAmount >
             workShares.maxShareSupply
@@ -150,18 +160,20 @@ contract dWorkSharesManager is ERC1155, Ownable {
         emit ShareBought(_sharesTokenId, _shareAmount, msg.sender);
     }
 
-    function setFactoryAddress(address _factoryAddress) external onlyOwner {
-        s_workFactoryAddress = _factoryAddress;
+    function setDWorkAddress(address _dWork) external onlyOwner {
+        s_dWork = _dWork;
     }
 
-    function pauseShares() external {
-        WorkShares storage workShares = _ensureOnlyWork();
+    function pauseShares(uint256 _workTokenId) external onlyDWork {
+        uint256 sharesTokenId = s_sharesTokenIdByWorkId[_workTokenId];
+        WorkShares storage workShares = s_workShares[sharesTokenId];
         workShares.isPaused = true;
         emit SharesPaused(workShares, true);
     }
 
-    function unpauseShares() external {
-        WorkShares storage workShares = _ensureOnlyWork();
+    function unpauseShares(uint256 _workTokenId) external onlyDWork {
+        uint256 sharesTokenId = s_sharesTokenIdByWorkId[_workTokenId];
+        WorkShares storage workShares = s_workShares[sharesTokenId];
         workShares.isPaused = false;
         emit SharesPaused(workShares, false);
     }
@@ -190,28 +202,10 @@ contract dWorkSharesManager is ERC1155, Ownable {
     // Internal
     ////////////////////
 
-    function _ensureTokenIdExists(
-        uint256 _sharesTokenId
-    ) internal view returns (WorkShares storage) {
-        WorkShares storage workShares = s_workShares[_sharesTokenId];
-        if (workShares.workContract == address(0)) {
+    function _ensureOnlydWork() internal view {
+        if (msg.sender != s_dWork) {
             revert dWork__NotWorkContract();
         }
-        return workShares;
-    }
-
-    function _ensureOnlyWorkFactory() internal view {
-        if (msg.sender != s_workFactoryAddress) {
-            revert dWork__NotFactoryContract();
-        }
-    }
-
-    function _ensureOnlyWork() internal view returns (WorkShares storage) {
-        uint256 shareTokenId = s_sharesTokenIds[msg.sender];
-        if (shareTokenId == 0) {
-            revert dWork__NotWorkContract();
-        }
-        return s_workShares[shareTokenId];
     }
 
     function _ensureSharesNotPaused(uint256 _sharesTokenId) internal view {
@@ -236,22 +230,28 @@ contract dWorkSharesManager is ERC1155, Ownable {
     // External / Public View
     ////////////////////
 
+    function getDWorkAddress() external view returns (address) {
+        return s_dWork;
+    }
+
+    function getLastTokenId() external view returns (uint256) {
+        return s_tokenId;
+    }
+
+    function getSharesTokenIdByWorkId(
+        uint256 _workTokenId
+    ) external view returns (uint256) {
+        return s_sharesTokenIdByWorkId[_workTokenId];
+    }
+
     function getWorkSharesByTokenId(
         uint256 _sharesTokenId
     ) external view returns (WorkShares memory) {
         return s_workShares[_sharesTokenId];
     }
 
-    function getWorkSharesByWorkContract(
-        address _workContract
-    ) external view returns (WorkShares memory) {
-        uint256 shareTokenId = s_sharesTokenIds[_workContract];
-        return s_workShares[shareTokenId];
-    }
-
-    function getWorkSharesTokenId(
-        address _workContract
-    ) external view returns (uint256) {
-        return s_sharesTokenIds[_workContract];
+    function getNativeTokenPriceUsd() external view returns (uint256) {
+        (, int256 answer, , , ) = s_priceFeed.latestRoundData();
+        return uint256(answer * 10000000000);
     }
 }

@@ -49,7 +49,7 @@ contract HelperConfig is Script {
             NetworkConfig({
                 donId: bytes32("fun-polygon-amoy-1"),
                 functionsRouter: 0xC22a79eBA640940ABB6dF0f7982cc119578E11De,
-                priceFeed: 0xF0d50568e3A7e8259E16663972b11910F89BD8e7,
+                priceFeed: 0x001382149eBa3441043c1c66972b4772963f5D43,
                 functionsSubId: 212
             });
     }

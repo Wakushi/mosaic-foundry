@@ -4,12 +4,17 @@ pragma solidity ^0.8.19;
 import {IDWorkConfig} from "./IDWorkConfig.sol";
 
 interface IWorkVerifier {
-    function sendCertificateExtractionRequest(string[] calldata _args) external;
+    function sendCertificateExtractionRequest(
+        uint256 _tokenizationRequestId,
+        string[] calldata _args
+    ) external;
 
-    function sendWorkVerificationRequest(string[] calldata _args) external;
+    function sendWorkVerificationRequest(
+        uint256 _tokenizationRequestId,
+        string[] calldata _args
+    ) external;
 
-    function getLastWorkVerificationResponse()
-        external
-        view
-        returns (IDWorkConfig.WorkVerificationResponse memory);
+    function getLastVerifiedData(
+        uint256 _tokenizationRequestId
+    ) external view returns (IDWorkConfig.VerifiedWorkData memory);
 }

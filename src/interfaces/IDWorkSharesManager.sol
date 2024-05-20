@@ -3,13 +3,13 @@ pragma solidity ^0.8.19;
 
 interface IDWorkSharesManager {
     function createShares(
-        address _workContract,
+        uint256 _workTokenId,
         address _workOwner,
         uint256 _shareSupply,
         uint256 _sharePriceUsd
     ) external returns (uint256);
 
-    function pauseShares() external;
+    function pauseShares(uint256 _tokenizationRequestId) external;
 
-    function unpauseShares() external;
+    function unpauseShares(uint256 _tokenizationRequestId) external;
 }

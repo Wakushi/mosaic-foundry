@@ -5,8 +5,6 @@ pragma solidity ^0.8.19;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {FunctionsClient} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/FunctionsClient.sol";
 import {FunctionsRequest} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
-import {IDWork} from "./interfaces/IDWork.sol";
-import {IDWorkFactory} from "./interfaces/IDWorkFactory.sol";
 import {IDWorkConfig} from "./interfaces/IDWorkConfig.sol";
 
 contract WorkVerifier is FunctionsClient, Ownable {
@@ -19,15 +17,6 @@ contract WorkVerifier is FunctionsClient, Ownable {
     enum WorkCFRequestType {
         WorkVerification,
         CertificateExtraction
-    }
-
-    struct WorkCFRequest {
-        WorkCFRequestType requestType;
-        address workRequester;
-        string customerSubmissionHash;
-        string appraiserReportHash;
-        string certificateImageHash;
-        uint256 timestamp;
     }
 
     ///////////////////
@@ -43,25 +32,22 @@ contract WorkVerifier is FunctionsClient, Ownable {
     string s_workVerificationSource;
     string s_certificateExtractionSource;
 
-    bytes s_lastResponse;
-    bytes s_lastError;
     bytes32 s_lastRequestId;
+    address s_dWork;
 
-    address s_workFactory;
-    IDWorkConfig.WorkVerificationResponse s_lastWorkVerificationResponse;
+    mapping(bytes32 requestId => uint256 tokenizationRequestId)
+        private s_tokenizationRequestIdByCFRequestId;
 
-    mapping(bytes32 requestId => WorkCFRequest request) private s_requestById;
+    mapping(uint256 tokenizationRequestId => WorkCFRequestType requestType) s_tokenizationRequestType;
+
+    mapping(uint256 tokenizationRequestId => IDWorkConfig.VerifiedWorkData lastVerifiedData) s_lastVerifiedData;
 
     ///////////////////
     // Events
     ///////////////////
 
     event ChainlinkRequestSent(bytes32 requestId);
-    event WorkVerificationDone(
-        address indexed workRequester,
-        bytes32 indexed requestId,
-        uint256 indexed timestamp
-    );
+    event VerifierTaskDone(uint256 indexed tokenizationRequestId);
 
     //////////////////
     // Errors
@@ -69,7 +55,6 @@ contract WorkVerifier is FunctionsClient, Ownable {
 
     error dWorkVerifier__UnexpectedRequestID(bytes32 requestId);
     error dWorkVerifier__NotWorkContract();
-    error dWorkVerifier__WorkFactoryNotSet();
 
     //////////////////
     // Functions
@@ -100,40 +85,36 @@ contract WorkVerifier is FunctionsClient, Ownable {
     ////////////////////
 
     function sendCertificateExtractionRequest(
+        uint256 _tokenizationRequestId,
         string[] calldata _args
     ) external onlyWorkContract returns (bytes32 requestId) {
         s_lastRequestId = _generateSendRequest(
             _args,
             s_certificateExtractionSource
         );
-        s_requestById[s_lastRequestId] = WorkCFRequest({
-            requestType: WorkCFRequestType.CertificateExtraction,
-            workRequester: msg.sender,
-            customerSubmissionHash: _args[0],
-            appraiserReportHash: "",
-            certificateImageHash: "",
-            timestamp: block.timestamp
-        });
+        _registerRequest(
+            _tokenizationRequestId,
+            s_lastRequestId,
+            WorkCFRequestType.CertificateExtraction
+        );
         return s_lastRequestId;
     }
 
     function sendWorkVerificationRequest(
+        uint256 _tokenizationRequestId,
         string[] calldata _args
     ) external onlyWorkContract returns (bytes32 requestId) {
         s_lastRequestId = _generateSendRequest(_args, s_workVerificationSource);
-        s_requestById[s_lastRequestId] = WorkCFRequest({
-            requestType: WorkCFRequestType.WorkVerification,
-            workRequester: msg.sender,
-            customerSubmissionHash: _args[0],
-            appraiserReportHash: _args[1],
-            certificateImageHash: "",
-            timestamp: block.timestamp
-        });
+        _registerRequest(
+            _tokenizationRequestId,
+            s_lastRequestId,
+            WorkCFRequestType.WorkVerification
+        );
         return s_lastRequestId;
     }
 
-    function setWorkFactory(address _workFactory) external onlyOwner {
-        s_workFactory = _workFactory;
+    function setDWorkAddress(address _dWork) external onlyOwner {
+        s_dWork = _dWork;
     }
 
     function updateCFSubId(uint64 _subscriptionId) external onlyOwner {
@@ -193,41 +174,80 @@ contract WorkVerifier is FunctionsClient, Ownable {
         bytes memory response,
         bytes memory err
     ) internal override {
-        if (s_lastRequestId != requestId) {
-            revert dWorkVerifier__UnexpectedRequestID(requestId);
-        }
+        uint256 tokenizationRequestId = s_tokenizationRequestIdByCFRequestId[
+            requestId
+        ];
 
-        WorkCFRequest storage request = s_requestById[requestId];
+        WorkCFRequestType requestType = s_tokenizationRequestType[
+            tokenizationRequestId
+        ];
 
-        if (request.requestType == WorkCFRequestType.CertificateExtraction) {
-            IDWork(request.workRequester).fulfillCertificateExtractionRequest(
-                requestId,
+        IDWorkConfig.VerifiedWorkData memory verifiedWorkData;
+
+        if (requestType == WorkCFRequestType.CertificateExtraction) {
+            (string memory artist, string memory work) = abi.decode(
                 response,
-                err,
-                request.certificateImageHash
+                (string, string)
             );
-        } else if (request.requestType == WorkCFRequestType.WorkVerification) {
-            s_lastWorkVerificationResponse = IDWorkConfig
-                .WorkVerificationResponse({
-                    requestId: requestId,
-                    response: response,
-                    err: err
-                });
-            emit WorkVerificationDone(
-                request.workRequester,
-                requestId,
-                block.timestamp
-            );
-        }
 
-        s_lastResponse = response;
+            verifiedWorkData.artist = artist;
+            verifiedWorkData.work = work;
+
+            _setLastVerifiedData(tokenizationRequestId, verifiedWorkData);
+
+            emit VerifierTaskDone(tokenizationRequestId);
+        } else if (requestType == WorkCFRequestType.WorkVerification) {
+            (string memory ownerName, uint256 priceUsd) = abi.decode(
+                response,
+                (string, uint256)
+            );
+
+            verifiedWorkData.ownerName = ownerName;
+            verifiedWorkData.priceUsd = priceUsd;
+
+            _setLastVerifiedData(tokenizationRequestId, verifiedWorkData);
+
+            emit VerifierTaskDone(tokenizationRequestId);
+        }
+    }
+
+    function _registerRequest(
+        uint256 _tokenizationRequestId,
+        bytes32 _requestId,
+        WorkCFRequestType _requestType
+    ) internal {
+        _setTokenizationRequestIdByCFRequestId(
+            _requestId,
+            _tokenizationRequestId
+        );
+        _setRequestType(_tokenizationRequestId, _requestType);
+    }
+
+    function _setRequestType(
+        uint256 _tokenizationRequestId,
+        WorkCFRequestType _requestType
+    ) internal {
+        s_tokenizationRequestType[_tokenizationRequestId] = _requestType;
+    }
+
+    function _setTokenizationRequestIdByCFRequestId(
+        bytes32 _requestId,
+        uint256 _tokenizationRequestId
+    ) internal {
+        s_tokenizationRequestIdByCFRequestId[
+            _requestId
+        ] = _tokenizationRequestId;
+    }
+
+    function _setLastVerifiedData(
+        uint256 _tokenizationRequestId,
+        IDWorkConfig.VerifiedWorkData memory _verifiedWorkData
+    ) internal {
+        s_lastVerifiedData[_tokenizationRequestId] = _verifiedWorkData;
     }
 
     function _ensureIsWorkContract() internal view {
-        if (s_workFactory == address(0)) {
-            revert dWorkVerifier__WorkFactoryNotSet();
-        }
-        if (!IDWorkFactory(s_workFactory).isWorkContract(msg.sender)) {
+        if (msg.sender != s_dWork) {
             revert dWorkVerifier__NotWorkContract();
         }
     }
@@ -236,33 +256,33 @@ contract WorkVerifier is FunctionsClient, Ownable {
     // External / Public View
     ////////////////////
 
-    function getLastWorkVerificationResponse()
-        external
-        view
-        returns (IDWorkConfig.WorkVerificationResponse memory)
-    {
-        return s_lastWorkVerificationResponse;
-    }
-
-    function getLastResponse() external view returns (bytes memory) {
-        return s_lastResponse;
+    function getLastVerifiedData(
+        uint256 _tokenizationRequestId
+    ) external view returns (IDWorkConfig.VerifiedWorkData memory) {
+        return s_lastVerifiedData[_tokenizationRequestId];
     }
 
     function getLastRequestId() external view returns (bytes32) {
         return s_lastRequestId;
     }
 
-    function getWorkFactory() external view returns (address) {
-        return s_workFactory;
+    function getTokenizationRequestId(
+        bytes32 requestId
+    ) external view returns (uint256) {
+        return s_tokenizationRequestIdByCFRequestId[requestId];
     }
 
-    function getWorkCFRequest(
-        bytes32 requestId
-    ) external view returns (WorkCFRequest memory) {
-        return s_requestById[requestId];
+    function getRequestType(
+        uint256 tokenizationRequestId
+    ) external view returns (WorkCFRequestType) {
+        return s_tokenizationRequestType[tokenizationRequestId];
     }
 
     function getSecretsReference() external view returns (bytes memory) {
         return s_secretReference;
+    }
+
+    function getDWorkAddress() external view returns (address) {
+        return s_dWork;
     }
 }

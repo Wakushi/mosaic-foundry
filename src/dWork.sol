@@ -5,14 +5,24 @@ pragma solidity ^0.8.19;
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {ERC721URIStorage} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import {ERC721Burnable} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721Burnable.sol";
 import {OracleLib, AggregatorV3Interface} from "./libraries/OracleLib.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
-import {IDWorkConfig} from "./interfaces/IDWorkConfig.sol";
 import {IDWorkSharesManager} from "./interfaces/IDWorkSharesManager.sol";
 import {IWorkVerifier} from "./interfaces/IWorkVerifier.sol";
 import {Log, ILogAutomation} from "@chainlink/contracts/src/v0.8/automation/interfaces/ILogAutomation.sol";
+import {IDWorkConfig} from "./interfaces/IDWorkConfig.sol";
 
-contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
+contract dWork is
+    ILogAutomation,
+    ERC721,
+    ERC721URIStorage,
+    ERC721Burnable,
+    Ownable,
+    Pausable
+{
     ///////////////////
     // Type declarations
     ///////////////////
@@ -20,49 +30,53 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
     using OracleLib for AggregatorV3Interface;
 
     enum VerificationStep {
-        Pending,
         PendingCertificateAnalysis,
         CertificateAnalysisDone,
         PendingWorkVerification,
+        WorkVerificationDone,
         PendingTokenization,
         Tokenized
+    }
+
+    struct TokenizationRequest {
+        string customerSubmissionIPFSHash;
+        string appraiserReportIPFSHash;
+        string certificateIPFSHash;
+        address customer;
+        string initialOwnerName;
+        uint256 lastWorkPriceUsd;
+        uint256 tokenId;
+        uint256 sharesTokenId;
+        bool isMinted;
+        bool isFractionalized;
+        bool isPaused;
+        uint256 lastVerifiedAt;
+        VerificationStep verificationStep;
+        WorkCertificate certificate;
     }
 
     struct WorkCertificate {
         string artist;
         string work;
-        uint256 year;
-        string imageURL;
-    }
-
-    struct TokenizedWork {
-        string artist;
-        string work;
-        string ownerName;
-        uint256 workPriceUsd;
     }
 
     ///////////////////
     // State variables
     ///////////////////
 
+    uint256 s_tokenizationRequestId;
+    uint256 s_tokenId;
+
+    bytes public s_lastPerformData;
+
+    mapping(uint256 tokenizationRequestId => TokenizationRequest tokenizationRequest) s_tokenizationRequests;
+    mapping(address customer => uint256[] tokenizationRequestsIds) s_customerTokenizationRequests;
+    mapping(uint256 tokenizationRequestId => uint256 sharesTokenId) s_sharesTokenIds;
+    mapping(uint256 workTokenId => TokenizationRequest tokenizationRequest) s_tokenById;
+
     uint256 constant MIN_VERIFICATION_INTERVAL = 30 days;
-    address immutable i_workFactoryAddress;
-    address immutable i_workSharesManager;
-    address immutable i_workVerifier;
-    string s_customerSubmissionIPFSHash;
-    string s_lastAppraiserReportIPFSHash;
-
-    VerificationStep s_verificationStep;
-    WorkCertificate s_certificate;
-    TokenizedWork s_tokenizedWork;
-
-    bool s_isMinted;
-    bool s_expectsWorkVerification;
-    uint256 s_lastVerifiedAt;
-    uint256 s_sharesTokenId;
-
-    address s_workOwner;
+    address s_workSharesManager;
+    address s_workVerifier;
 
     bytes s_lastVerifierResponse;
     bytes s_lastVerifierError;
@@ -72,64 +86,60 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
     ///////////////////
 
     event WorkFractionalized(uint256 sharesTokenId);
-    event VerificationProcess(VerificationStep step);
-    event CertificateExtracted(WorkCertificate certificate);
-    event WorkTokenized(TokenizedWork tokenizedWork);
+    event VerificationProcess(
+        uint256 tokenizationRequestId,
+        VerificationStep step
+    );
+    event CertificateExtracted(
+        uint256 tokenizationRequestId,
+        WorkCertificate certificate
+    );
+    event WorkTokenized(uint256 tokenizationRequestId);
     event LastVerificationFailed(
         string previousOwner,
         uint256 previousPrice,
         string newOwner,
         uint256 newPrice
     );
-    event ChainlinkResponse(
-        bytes32 indexed requestId,
-        bytes response,
-        bytes err
+    event WorkSharesCreated(
+        uint256 sharesTokenId,
+        uint256 workTokenId,
+        uint256 shareSupply
     );
+    event CertificateExtractionError(uint256 tokenizationRequestId);
+    event WorkVerificationError(uint256 tokenizationRequestId);
 
     //////////////////
     // Errors
     ///////////////////
 
-    error dWork__AlreadyMinted();
-    error dWork__NotOwnerOrFactory();
+    error dWork__WorkNotMinted();
+    error dWork__AlreadyFractionalized();
     error dWork__ProcessOrderError();
     error dWork__NotEnoughTimePassedSinceLastVerification();
-    error dWork__NotWorkOwner();
-    error dWork__NotWorkVerifier();
     error dWork__WorkVerificationNotExpected();
+    error dWork__NotZeroAddress();
+    error dWork__TokenPaused();
 
     //////////////////
     // Modifiers
     //////////////////
 
-    modifier notMinted() {
-        _ensureNotMinted();
+    modifier notZeroAddress(address _address) {
+        _ensureNotZeroAddress(_address);
         _;
     }
 
-    modifier onlyOwnerOrFactory() {
-        _ensureOwnerOrFactory();
+    modifier verifyProcessOrder(
+        uint256 _tokenizationRequestId,
+        VerificationStep _requiredStep
+    ) {
+        _ensureProcessOrder(_tokenizationRequestId, _requiredStep);
         _;
     }
 
-    modifier onlyFactory() {
-        _ensureOnlyFactory();
-        _;
-    }
-
-    modifier onlyWorkOwner() {
-        _ensureOnlyWorkOwner();
-        _;
-    }
-
-    modifier onlyWorkVerifier() {
-        _ensureOnlyWorkVerifier();
-        _;
-    }
-
-    modifier verifyProcessOrder(VerificationStep _requiredStep) {
-        _ensureProcessOrder(_requiredStep);
+    modifier tokenNotPaused(uint256 _tokenId) {
+        _ensureTokenNotPaused(_tokenId);
         _;
     }
 
@@ -138,15 +148,11 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
     //////////////////
 
     constructor(
-        IDWorkConfig.dWorkConfig memory _config
-    ) Ownable(_config.owner) ERC721(_config.workName, _config.workSymbol) {
-        s_customerSubmissionIPFSHash = _config.customerSubmissionIPFSHash;
-        s_lastAppraiserReportIPFSHash = _config.appraiserReportIPFSHash;
-        s_workOwner = _config.customer;
-        i_workFactoryAddress = _config.factoryAddress;
-        i_workSharesManager = _config.workSharesManagerAddress;
-        i_workVerifier = _config.workVerifierAddress;
-        s_verificationStep = VerificationStep.Pending;
+        address _workSharesManager,
+        address _workVerifier
+    ) Ownable(msg.sender) ERC721("xArtwork", "xART") {
+        s_workSharesManager = _workSharesManager;
+        s_workVerifier = _workVerifier;
     }
 
     ////////////////////
@@ -155,74 +161,103 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
 
     /**
      *
-     * @param _args [CERTIFICATE IMAGE IPFS HASH]
-     * @notice Request the certificate data extraction from the scanned image.
-     * @dev Tasks the WorkVerifier contract to extract the image data using OpenAI GPT-4o through Chainlink Functions.
-     * Once fulfilled on WorkVerifier, it will call back the fulfillCertificateExtractionRequest() function on this contract.
-     * Note: This function can only be called as long as the work is not minted.
+     * @param _customerSubmissionIPFSHash The IPFS hash of the customer submission.
+     * @param _appraiserReportIPFSHash The IPFS hash of the appraiser report.
+     * @param _certificateIPFSHash The IPFS hash of the certificate image.
+     * @param _customer The address of the customer who submitted the work.
+     * @notice Open a new tokenization request for a work of art. It registers the initial data and tasks the WorkVerifier contract to extract the certificate of authenticity.
      */
-    function requestCertificateExtraction(
-        string[] calldata _args
-    ) external onlyOwnerOrFactory notMinted {
-        _sendCertificateExtractionRequest(_args);
+    function openTokenizationRequest(
+        string memory _customerSubmissionIPFSHash,
+        string memory _appraiserReportIPFSHash,
+        string memory _certificateIPFSHash,
+        address _customer
+    ) external onlyOwner notZeroAddress(_customer) {
+        ++s_tokenizationRequestId;
+        s_tokenizationRequests[s_tokenizationRequestId] = TokenizationRequest({
+            customerSubmissionIPFSHash: _customerSubmissionIPFSHash,
+            appraiserReportIPFSHash: _appraiserReportIPFSHash,
+            certificateIPFSHash: _certificateIPFSHash,
+            customer: _customer,
+            initialOwnerName: "",
+            lastWorkPriceUsd: 0,
+            tokenId: 0,
+            sharesTokenId: 0,
+            isMinted: false,
+            isFractionalized: false,
+            lastVerifiedAt: 0,
+            isPaused: false,
+            verificationStep: VerificationStep.PendingCertificateAnalysis,
+            certificate: WorkCertificate({artist: "", work: ""})
+        });
+        s_customerTokenizationRequests[_customer].push(s_tokenizationRequestId);
+        _sendCertificateExtractionRequest(
+            s_tokenizationRequestId,
+            _certificateIPFSHash
+        );
     }
 
     /**
      * @notice Request the work verification using all aggregated data.
      * @dev Tasks the WorkVerifier contract to fetch and organize all data sources using OpenAI GPT-4o through Chainlink Functions.
      * This request will fetch the data from the customer submission, the appraiser report and global market data,
-     * join the certificate data obtained by requestCertificateExtraction() and logically verify the work.
-     * Once the request is fulfilled, the fulfillWorkVerificationRequest() function will be called on this contract to mint the work as an ERC721 token.
+     * join the certificate data obtained by _sendCertificateExtractionRequest() and logically verify the work.
+     * Once the request is fulfilled, the _fulfillWorkVerificationRequest() function will be called on this contract to mint the work as an ERC721 token.
      *
      * Note: This function has to be called after the certificate extraction request is fulfilled, and then
-     * will be called every month with the latest appraiser report using Chainlink Automation.
+     * will be called every 3 months with the latest appraiser report using Chainlink Automation.
      */
-    function requestWorkVerification()
-        external
-        verifyProcessOrder(VerificationStep.CertificateAnalysisDone)
-    {
-        if (isMinted()) {
-            _ensureEnoughTimePassedSinceLastVerification();
-        }
-        _sendWorkVerificationRequest();
-    }
-
-    /**
-     * @param requestId The Chainlink request ID.
-     * @param response The response data from the Chainlink node.
-     * @param err The error message from the Chainlink node.
-     * @param certificateImageHash The IPFS hash of the certificate image.
-     * @notice Registers the data extracted from the certificate of authenticity on this contract.
-     * @dev This function can only be called by the WorkVerifier contract, after the certificate extraction request is fulfilled.
-     */
-    function fulfillCertificateExtractionRequest(
-        bytes32 requestId,
-        bytes memory response,
-        bytes memory err,
-        string memory certificateImageHash
+    function requestWorkVerification(
+        uint256 _tokenizationRequestId
     )
         external
-        onlyWorkVerifier
-        verifyProcessOrder(VerificationStep.PendingCertificateAnalysis)
+        verifyProcessOrder(
+            _tokenizationRequestId,
+            VerificationStep.CertificateAnalysisDone
+        )
     {
-        _fullfillCertificateExtractionRequest(
-            requestId,
-            response,
-            err,
-            certificateImageHash
-        );
+        if (isMinted(_tokenizationRequestId)) {
+            _ensureEnoughTimePassedSinceLastVerification(
+                _tokenizationRequestId
+            );
+        }
+        _sendWorkVerificationRequest(_tokenizationRequestId);
     }
 
-    /**
-     * @notice Fulfill the work verification request by minting the work as an ERC721 token.
-     * @dev Called by Chainlink Log-based Automation, when WorkVerificationDone event is emitted on WorkVerifier contract.
-     */
-    function fulfillWorkVerificationRequest()
-        public
-        verifyProcessOrder(VerificationStep.CertificateAnalysisDone)
-    {
-        _ensureExpectsWorkVerification();
-        _fulfillWorkVerificationRequest();
+    function createWorkShares(
+        uint256 _tokenizationRequestId,
+        uint256 _shareSupply,
+        uint256 _sharePriceUsd
+    ) external onlyOwner {
+        TokenizationRequest
+            storage tokenizationRequest = s_tokenizationRequests[
+                _tokenizationRequestId
+            ];
+
+        if (!tokenizationRequest.isMinted) {
+            revert dWork__WorkNotMinted();
+        }
+
+        if (tokenizationRequest.isFractionalized) {
+            revert dWork__AlreadyFractionalized();
+        }
+
+        address workOwner = ownerOf(tokenizationRequest.tokenId);
+
+        uint256 sharesTokenId = IDWorkSharesManager(s_workSharesManager)
+            .createShares(
+                tokenizationRequest.tokenId,
+                workOwner,
+                _shareSupply,
+                _sharePriceUsd
+            );
+
+        tokenizationRequest.sharesTokenId = sharesTokenId;
+        emit WorkSharesCreated(
+            sharesTokenId,
+            tokenizationRequest.tokenId,
+            _shareSupply
+        );
     }
 
     /**
@@ -231,9 +266,11 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
      * @notice Update the IPFS hash of the latest appraiser report.
      */
     function updateLastAppraiserReportIPFSHash(
+        uint256 _tokenizationRequestId,
         string calldata _newAppraiserReportIPFSHash
-    ) external onlyOwnerOrFactory {
-        s_lastAppraiserReportIPFSHash = _newAppraiserReportIPFSHash;
+    ) external onlyOwner {
+        s_tokenizationRequests[_tokenizationRequestId]
+            .appraiserReportIPFSHash = _newAppraiserReportIPFSHash;
     }
 
     /**
@@ -243,57 +280,80 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
      * This function can only be called by the factory contract after calling its createWorkShares() function.
      */
     function setWorkSharesTokenId(
+        uint256 _tokenizationRequestId,
         uint256 _sharesTokenId
-    ) external onlyFactory whenNotPaused {
-        s_sharesTokenId = _sharesTokenId;
+    ) external onlyOwner whenNotPaused {
+        s_sharesTokenIds[_tokenizationRequestId] = _sharesTokenId;
         emit WorkFractionalized(_sharesTokenId);
     }
 
     /**
-     * @dev Triggered using Chainlink log-based Automation once a WorkVerificationDone event is emitted by
+     * @dev Triggered using Chainlink log-based Automation once a VerifierTaskDone event is emitted by
      * the WorkVerifier contract. It confirms that the work verification is needed and that performUpkeep() should be called.
      */
     function checkLog(
         Log calldata log,
         bytes memory
     ) external view returns (bool upkeepNeeded, bytes memory performData) {
-        address workRequester = bytes32ToAddress(log.topics[1]);
-        upkeepNeeded = workRequester == address(this);
-        performData = abi.encode(workRequester);
+        uint256 tokenizationRequestId = bytes32ToUint256(log.topics[1]);
+        VerificationStep requestVerificationStep = getTokenizationRequestStatus(
+            tokenizationRequestId
+        );
+        if (
+            requestVerificationStep ==
+            VerificationStep.PendingWorkVerification ||
+            requestVerificationStep ==
+            VerificationStep.PendingCertificateAnalysis
+        ) {
+            performData = abi.encode(tokenizationRequestId);
+            upkeepNeeded = true;
+        }
     }
 
     /**
      * @dev Called by Chainlink log-based Automation to fulfill the work verification request.
-     * It should be triggered by when the WorkVerificationDone event is emitted by the WorkVerifier contract.
+     * It should be triggered by when the VerifierTaskDone event is emitted by the WorkVerifier contract.
      */
     function performUpkeep(bytes calldata performData) external override {
-        address workRequester = abi.decode(performData, (address));
-        if (workRequester == address(this)) {
-            fulfillWorkVerificationRequest();
+        s_lastPerformData = performData;
+        uint256 tokenizationRequestId = abi.decode(performData, (uint256));
+        IDWorkConfig.VerifiedWorkData memory lastVerifiedData = IWorkVerifier(
+            s_workVerifier
+        ).getLastVerifiedData(tokenizationRequestId);
+        if (
+            s_tokenizationRequests[tokenizationRequestId].verificationStep ==
+            VerificationStep.PendingCertificateAnalysis
+        ) {
+            _fullfillCertificateExtractionRequest(
+                tokenizationRequestId,
+                lastVerifiedData.artist,
+                lastVerifiedData.work
+            );
+        } else if (
+            s_tokenizationRequests[tokenizationRequestId].verificationStep ==
+            VerificationStep.PendingWorkVerification
+        ) {
+            _fulfillWorkVerificationRequest(
+                tokenizationRequestId,
+                lastVerifiedData.ownerName,
+                lastVerifiedData.priceUsd
+            );
         }
     }
 
     function approve(
         address to,
         uint256 tokenId
-    ) public override whenNotPaused onlyWorkOwner {
+    ) public override(ERC721, IERC721) tokenNotPaused(tokenId) {
         super.approve(to, tokenId);
-    }
-
-    function setApprovalForAll(
-        address operator,
-        bool approved
-    ) public override whenNotPaused onlyWorkOwner {
-        super.setApprovalForAll(operator, approved);
     }
 
     function transferFrom(
         address from,
         address to,
         uint256 tokenId
-    ) public override whenNotPaused onlyWorkOwner {
+    ) public override(ERC721, IERC721) tokenNotPaused(tokenId) {
         super.transferFrom(from, to, tokenId);
-        s_workOwner = to;
     }
 
     function safeTransferFrom(
@@ -301,106 +361,116 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
         address to,
         uint256 tokenId,
         bytes memory data
-    ) public override whenNotPaused onlyWorkOwner {
+    ) public override(ERC721, IERC721) tokenNotPaused(tokenId) {
         super.safeTransferFrom(from, to, tokenId, data);
-        s_workOwner = to;
+    }
+
+    function setWorkSharesManager(
+        address _workSharesManager
+    ) external onlyOwner {
+        s_workSharesManager = _workSharesManager;
+    }
+
+    function setWorkVerifier(address _workVerifier) external onlyOwner {
+        s_workVerifier = _workVerifier;
     }
 
     ////////////////////
     // Internal
     ////////////////////
 
-    function _sendCertificateExtractionRequest(string[] memory _args) internal {
-        s_verificationStep = VerificationStep.PendingCertificateAnalysis;
-        IWorkVerifier(i_workVerifier).sendCertificateExtractionRequest(_args);
-        emit VerificationProcess(VerificationStep.PendingCertificateAnalysis);
+    function _sendCertificateExtractionRequest(
+        uint256 _tokenizationRequestId,
+        string memory _certificateIPFSHash
+    ) internal {
+        string[] memory _args = new string[](1);
+        _args[0] = _certificateIPFSHash;
+        IWorkVerifier(s_workVerifier).sendCertificateExtractionRequest(
+            _tokenizationRequestId,
+            _args
+        );
+        emit VerificationProcess(
+            _tokenizationRequestId,
+            VerificationStep.PendingCertificateAnalysis
+        );
     }
 
-    function _sendWorkVerificationRequest() internal {
+    function _sendWorkVerificationRequest(
+        uint256 _tokenizationRequestId
+    ) internal {
+        TokenizationRequest
+            storage tokenizationRequest = s_tokenizationRequests[
+                _tokenizationRequestId
+            ];
         string[] memory _args = new string[](4);
-        _args[0] = s_customerSubmissionIPFSHash;
-        _args[1] = s_lastAppraiserReportIPFSHash;
-        _args[2] = s_certificate.artist;
-        _args[3] = s_certificate.work;
+        _args[0] = tokenizationRequest.customerSubmissionIPFSHash;
+        _args[1] = tokenizationRequest.appraiserReportIPFSHash;
+        _args[2] = tokenizationRequest.certificate.artist;
+        _args[3] = tokenizationRequest.certificate.work;
 
-        IWorkVerifier(i_workVerifier).sendWorkVerificationRequest(_args);
-        s_expectsWorkVerification = true;
-        emit VerificationProcess(VerificationStep.PendingWorkVerification);
+        tokenizationRequest.verificationStep = VerificationStep
+            .PendingWorkVerification;
+
+        IWorkVerifier(s_workVerifier).sendWorkVerificationRequest(
+            _tokenizationRequestId,
+            _args
+        );
+        emit VerificationProcess(
+            _tokenizationRequestId,
+            VerificationStep.PendingWorkVerification
+        );
     }
 
     function _fullfillCertificateExtractionRequest(
-        bytes32 requestId,
-        bytes memory response,
-        bytes memory err,
-        string memory certificateImageHash
+        uint256 _tokenizationRequestId,
+        string memory _artist,
+        string memory _work
     ) internal {
-        (string memory artist, string memory work, uint256 year) = abi.decode(
-            response,
-            (string, string, uint256)
-        );
-
-        if (bytes(artist).length == 0 || bytes(work).length == 0 || year == 0) {
-            s_lastVerifierError = err;
-            emit ChainlinkResponse(
-                requestId,
-                s_lastVerifierResponse,
-                s_lastVerifierError
-            );
+        if (bytes(_artist).length == 0 || bytes(_work).length == 0) {
+            emit CertificateExtractionError(_tokenizationRequestId);
             return;
         }
 
         WorkCertificate memory workCertificate;
-        workCertificate = WorkCertificate({
-            artist: artist,
-            work: work,
-            year: year,
-            imageURL: certificateImageHash
-        });
+        workCertificate = WorkCertificate({artist: _artist, work: _work});
 
-        s_certificate = workCertificate;
-        s_verificationStep = VerificationStep.CertificateAnalysisDone;
+        s_tokenizationRequests[_tokenizationRequestId]
+            .certificate = workCertificate;
+        s_tokenizationRequests[_tokenizationRequestId]
+            .verificationStep = VerificationStep.CertificateAnalysisDone;
 
-        emit VerificationProcess(VerificationStep.CertificateAnalysisDone);
-        emit CertificateExtracted(workCertificate);
-        emit ChainlinkResponse(
-            requestId,
-            s_lastVerifierResponse,
-            s_lastVerifierError
-        );
+        emit CertificateExtracted(_tokenizationRequestId, workCertificate);
     }
 
-    function _fulfillWorkVerificationRequest() internal {
-        IDWorkConfig.WorkVerificationResponse
-            memory workVerificationResponse = IWorkVerifier(i_workVerifier)
-                .getLastWorkVerificationResponse();
-        (string memory ownerName, uint256 priceUsd) = abi.decode(
-            workVerificationResponse.response,
-            (string, uint256)
-        );
-
-        if (priceUsd == 0) {
-            s_lastVerifierError = workVerificationResponse.err;
-            emit ChainlinkResponse(
-                workVerificationResponse.requestId,
-                s_lastVerifierResponse,
-                s_lastVerifierError
-            );
+    function _fulfillWorkVerificationRequest(
+        uint256 _tokenizationRequestId,
+        string memory _ownerName,
+        uint256 _priceUsd
+    ) internal {
+        if (_priceUsd == 0) {
+            emit WorkVerificationError(_tokenizationRequestId);
             return;
         }
 
-        if (isMinted()) {
-            _compareLatestAppraiserReport(ownerName, priceUsd);
+        s_tokenizationRequests[_tokenizationRequestId]
+            .verificationStep = VerificationStep.WorkVerificationDone;
+
+        s_tokenizationRequests[_tokenizationRequestId].lastVerifiedAt = block
+            .timestamp;
+
+        if (isMinted(_tokenizationRequestId)) {
+            _compareLatestAppraiserReport(
+                _tokenizationRequestId,
+                _ownerName,
+                _priceUsd
+            );
         } else {
-            _tokenizeWork(ownerName, priceUsd);
+            _tokenizeWork(_tokenizationRequestId, _ownerName, _priceUsd);
         }
 
-        s_lastVerifiedAt = block.timestamp;
-        s_expectsWorkVerification = false;
-        emit VerificationProcess(s_verificationStep);
-        emit ChainlinkResponse(
-            workVerificationResponse.requestId,
-            s_lastVerifierResponse,
-            s_lastVerifierError
+        emit VerificationProcess(
+            _tokenizationRequestId,
+            s_tokenizationRequests[_tokenizationRequestId].verificationStep
         );
     }
 
@@ -409,102 +479,105 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
      * If there is a significant difference, freeze the work contract
      */
     function _compareLatestAppraiserReport(
+        uint256 _tokenizationRequestId,
         string memory _ownerName,
         uint256 _priceUsd
     ) internal {
+        TokenizationRequest memory tokenizationRequest = s_tokenizationRequests[
+            _tokenizationRequestId
+        ];
         if (
             (keccak256(abi.encodePacked(_ownerName)) !=
-                keccak256(abi.encodePacked(s_tokenizedWork.ownerName))) ||
-            _priceUsd != s_tokenizedWork.workPriceUsd
+                keccak256(
+                    abi.encodePacked(tokenizationRequest.initialOwnerName)
+                )) || _priceUsd != tokenizationRequest.lastWorkPriceUsd
         ) {
             _pause();
-            if (isFractionalized()) {
-                IDWorkSharesManager(i_workSharesManager).pauseShares();
+            if (isFractionalized(_tokenizationRequestId)) {
+                IDWorkSharesManager(s_workSharesManager).pauseShares(
+                    _tokenizationRequestId
+                );
             }
             emit LastVerificationFailed(
-                s_tokenizedWork.ownerName,
-                s_tokenizedWork.workPriceUsd,
+                tokenizationRequest.initialOwnerName,
+                tokenizationRequest.lastWorkPriceUsd,
                 _ownerName,
                 _priceUsd
             );
         } else {
             if (paused()) {
                 _unpause();
-                IDWorkSharesManager(i_workSharesManager).unpauseShares();
+                IDWorkSharesManager(s_workSharesManager).unpauseShares(
+                    _tokenizationRequestId
+                );
             }
         }
     }
 
     function _tokenizeWork(
+        uint256 _tokenizationRequestId,
         string memory _verifiedOwnerName,
         uint256 _verifiedPriceUsd
     ) internal {
-        _mintWork();
-        TokenizedWork memory tokenizedWork;
-        tokenizedWork = TokenizedWork({
-            artist: s_certificate.artist,
-            work: s_certificate.work,
-            ownerName: _verifiedOwnerName,
-            workPriceUsd: _verifiedPriceUsd
-        });
-        s_tokenizedWork = tokenizedWork;
-        s_verificationStep = VerificationStep.Tokenized;
-        emit WorkTokenized(tokenizedWork);
+        TokenizationRequest
+            storage tokenizationRequest = s_tokenizationRequests[
+                _tokenizationRequestId
+            ];
+
+        _mintWork(_tokenizationRequestId);
+
+        tokenizationRequest.isMinted = true;
+        tokenizationRequest.initialOwnerName = _verifiedOwnerName;
+        tokenizationRequest.lastWorkPriceUsd = _verifiedPriceUsd;
+        tokenizationRequest.verificationStep = VerificationStep.Tokenized;
+
+        emit WorkTokenized(_tokenizationRequestId);
     }
 
-    function _mintWork() internal {
-        s_isMinted = true;
-        _safeMint(s_workOwner, 0);
+    function _mintWork(uint256 _tokenizationRequestId) internal {
+        ++s_tokenId;
+        s_tokenizationRequests[_tokenizationRequestId].isMinted = true;
+        s_tokenizationRequests[_tokenizationRequestId].tokenId = s_tokenId;
+        _safeMint(
+            s_tokenizationRequests[_tokenizationRequestId].customer,
+            s_tokenId
+        );
     }
 
-    function _ensureNotMinted() internal view {
-        if (isMinted()) {
-            revert dWork__AlreadyMinted();
+    function _ensureNotZeroAddress(address _address) internal pure {
+        if (_address == address(0)) {
+            revert dWork__NotZeroAddress();
         }
     }
 
-    function _ensureProcessOrder(VerificationStep _requiredStep) internal view {
-        if (s_verificationStep < _requiredStep) {
+    function _ensureProcessOrder(
+        uint256 _tokenizationRequestId,
+        VerificationStep _requiredStep
+    ) internal view {
+        if (
+            s_tokenizationRequests[_tokenizationRequestId].verificationStep <
+            _requiredStep
+        ) {
             revert dWork__ProcessOrderError();
         }
     }
 
-    function _ensureOwnerOrFactory() internal view {
-        if (msg.sender != owner() && msg.sender != i_workFactoryAddress) {
-            revert dWork__NotOwnerOrFactory();
-        }
-    }
-
-    function _ensureOnlyFactory() internal view {
-        if (msg.sender != i_workFactoryAddress) {
-            revert dWork__NotOwnerOrFactory();
-        }
-    }
-
-    function _ensureOnlyWorkVerifier() internal view {
-        if (msg.sender != i_workVerifier) {
-            revert dWork__NotWorkVerifier();
-        }
-    }
-
-    function _ensureOnlyWorkOwner() internal view {
-        if (msg.sender != s_workOwner) {
-            revert dWork__NotWorkOwner();
-        }
-    }
-
-    function _ensureEnoughTimePassedSinceLastVerification() internal view {
+    function _ensureEnoughTimePassedSinceLastVerification(
+        uint256 _tokenizationRequestId
+    ) internal view {
+        uint256 lastVerifiedAt = s_tokenizationRequests[_tokenizationRequestId]
+            .lastVerifiedAt;
         if (
-            s_lastVerifiedAt != 0 &&
-            block.timestamp - s_lastVerifiedAt < MIN_VERIFICATION_INTERVAL
+            lastVerifiedAt != 0 &&
+            block.timestamp - lastVerifiedAt < MIN_VERIFICATION_INTERVAL
         ) {
             revert dWork__NotEnoughTimePassedSinceLastVerification();
         }
     }
 
-    function _ensureExpectsWorkVerification() internal view {
-        if (!s_expectsWorkVerification) {
-            revert dWork__WorkVerificationNotExpected();
+    function _ensureTokenNotPaused(uint256 _tokenId) internal view {
+        if (s_tokenById[_tokenId].isPaused) {
+            revert dWork__TokenPaused();
         }
     }
 
@@ -512,79 +585,97 @@ contract dWork is ILogAutomation, ERC721, Ownable, Pausable {
     // External / Public View
     ////////////////////
 
-    function isMinted() public view returns (bool) {
-        return s_isMinted;
+    function getTokenizationRequest(
+        uint256 _tokenizationRequestId
+    ) public view returns (TokenizationRequest memory) {
+        return s_tokenizationRequests[_tokenizationRequestId];
     }
 
-    function isFractionalized() public view returns (bool) {
-        return s_sharesTokenId != 0;
+    function getTokenizationRequestStatus(
+        uint256 _tokenizationRequestId
+    ) public view returns (VerificationStep) {
+        return s_tokenizationRequests[_tokenizationRequestId].verificationStep;
     }
 
-    function getWorkPriceUsd() external view returns (uint256) {
-        return s_tokenizedWork.workPriceUsd;
+    function getLastTokenId() public view returns (uint256) {
+        return s_tokenId;
     }
 
-    function getWorkOwner() external view returns (address) {
-        return s_workOwner;
+    function getSharesTokenId(
+        uint256 _tokenizationRequestId
+    ) public view returns (uint256) {
+        return s_sharesTokenIds[_tokenizationRequestId];
     }
 
-    function getLastResponse() external view returns (bytes memory) {
+    function getWorkSharesManager() public view returns (address) {
+        return s_workSharesManager;
+    }
+
+    function getTokenizationRequestByWorkTokenId(
+        uint256 _workTokenId
+    ) public view returns (TokenizationRequest memory) {
+        return s_tokenById[_workTokenId];
+    }
+
+    function customerTokenizationRequests(
+        address _customer
+    ) public view returns (uint256[] memory) {
+        return s_customerTokenizationRequests[_customer];
+    }
+
+    function getWorkVerifier() public view returns (address) {
+        return s_workVerifier;
+    }
+
+    function getLastVerifierResponse() public view returns (bytes memory) {
         return s_lastVerifierResponse;
     }
 
-    function getLastError() external view returns (bytes memory) {
+    function getLastVerifierError() public view returns (bytes memory) {
         return s_lastVerifierError;
     }
 
-    function getWorkFactoryAddress() external view returns (address) {
-        return i_workFactoryAddress;
+    function getLastTokenizationRequestId() public view returns (uint256) {
+        return s_tokenizationRequestId;
     }
 
-    function getWorkSharesManagerAddress() external view returns (address) {
-        return i_workSharesManager;
+    function isMinted(
+        uint256 _tokenizationRequestId
+    ) public view returns (bool) {
+        return s_tokenizationRequests[_tokenizationRequestId].isMinted;
     }
 
-    function getWorkVerifierAddress() external view returns (address) {
-        return i_workVerifier;
+    function isFractionalized(
+        uint256 _tokenizationRequestId
+    ) public view returns (bool) {
+        return s_tokenizationRequests[_tokenizationRequestId].isFractionalized;
     }
 
-    function getCertificate() external view returns (WorkCertificate memory) {
-        return s_certificate;
+    function bytes32ToUint256(bytes32 _uint) public pure returns (uint256) {
+        return uint256(_uint);
     }
 
-    function getVerificationStep() external view returns (VerificationStep) {
-        return s_verificationStep;
+    function bytes32ToString(
+        bytes32 _bytes32
+    ) public pure returns (string memory) {
+        return string(abi.encodePacked(_bytes32));
     }
 
-    function getTokenizedWork() external view returns (TokenizedWork memory) {
-        return s_tokenizedWork;
+    function toBytes(bytes32 _data) public pure returns (bytes memory) {
+        return abi.encodePacked(_data);
     }
 
-    function getSharesTokenId() external view returns (uint256) {
-        return s_sharesTokenId;
+    function tokenURI(
+        uint256 tokenId
+    ) public view override(ERC721, ERC721URIStorage) returns (string memory) {
+        return super.tokenURI(tokenId);
     }
 
-    function getCustomerSubmissionIPFSHash()
-        external
-        view
-        returns (string memory)
-    {
-        return s_customerSubmissionIPFSHash;
-    }
-
-    function getLastAppraiserReportIPFSHash()
-        external
-        view
-        returns (string memory)
-    {
-        return s_lastAppraiserReportIPFSHash;
-    }
-
-    function getLastVerifiedAt() external view returns (uint256) {
-        return s_lastVerifiedAt;
-    }
-
-    function bytes32ToAddress(bytes32 _address) public pure returns (address) {
-        return address(uint160(uint256(_address)));
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view override(ERC721, ERC721URIStorage) returns (bool) {
+        return
+            super.supportsInterface(interfaceId) ||
+            interfaceId == type(ERC721Burnable).interfaceId;
     }
 }

@@ -54,11 +54,11 @@ endif
 deployShares:
 	@forge script script/DeployDWorkSharesManager.s.sol:DeployDWorkSharesManager $(NETWORK_ARGS)
 
-deployFactory:
-	@forge script script/DeployDWorkFactory.s.sol:DeployDWorkFactory $(NETWORK_ARGS)
-
 deployVerifier:
 	@forge script script/DeployWorkVerifier.s.sol:DeployWorkVerifier $(NETWORK_ARGS)
+
+deployWork:
+	@forge script script/DeployDWork.s.sol:DeployDWork $(NETWORK_ARGS)
 
 createSubscription:
 	@forge script script/Interactions.s.sol:CreateSubscription $(NETWORK_ARGS)

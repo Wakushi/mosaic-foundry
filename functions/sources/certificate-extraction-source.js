@@ -57,8 +57,5 @@ const result = await analyzeCertificate(imageURL)
 const analyzedData = JSON.parse(result)
 const { artist, title, year } = analyzedData
 
-const encoded = abiCoder.encode(
-  ["string", "string", "uint256"],
-  [artist, title, year]
-)
+const encoded = abiCoder.encode(["string", "string"], [artist, title])
 return ethers.getBytes(encoded)
