@@ -172,7 +172,12 @@ contract dWork is
         string memory _appraiserReportIPFSHash,
         string memory _certificateIPFSHash,
         address _customer
-    ) external onlyOwner notZeroAddress(_customer) {
+    )
+        external
+        onlyOwner
+        notZeroAddress(_customer)
+        returns (uint256 tokenizationRequestId)
+    {
         ++s_tokenizationRequestId;
         s_tokenizationRequests[s_tokenizationRequestId] = TokenizationRequest({
             customerSubmissionIPFSHash: _customerSubmissionIPFSHash,
@@ -190,11 +195,15 @@ contract dWork is
             verificationStep: VerificationStep.PendingCertificateAnalysis,
             certificate: WorkCertificate({artist: "", work: ""})
         });
+
         s_customerTokenizationRequests[_customer].push(s_tokenizationRequestId);
+
         _sendCertificateExtractionRequest(
             s_tokenizationRequestId,
             _certificateIPFSHash
         );
+
+        return s_tokenizationRequestId;
     }
 
     /**
