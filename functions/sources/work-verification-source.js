@@ -58,13 +58,13 @@ async function fetchWorkDetails(permalink) {
 async function fetchWorkMarketData(work) {
   try {
     const artist = await fetchArtistData(formatArtistNameMW(work.artist))
-    const externalWork = artist.works.find(
-      (workMW) => workMW.workTitle === work.title
-    )
+    const externalWork = artist.works.find((workMW) => {
+      return workMW.workTitle.replace(/^"|"$/g, "") === work.title
+    })
     const { permalink } = externalWork
     const marketData = await fetchWorkDetails(permalink)
     return {
-      title: marketData.workTitle,
+      title: marketData.workTitle.replace(/^"|"$/g, ""),
       artist: artist.artistName,
       lastSaleDate: marketData.lastSaleDate,
       lastSalePrice: marketData.lastSalePrice,
@@ -176,6 +176,7 @@ try {
     customerSubmissionHash,
     reportHash
   )
+
   const organizedData = await organizeData(aggregatedData)
   const sanitizedData = {} // { "artist": [], "title": [], "price": [], "customerAndOwnerName": [] }
 
@@ -200,6 +201,7 @@ try {
     return ethers.getBytes(encoded)
   }
 } catch (error) {
+  console.log(error)
   const encoded = abiCoder.encode(["string", "uint256"], ["error", 0])
   return ethers.getBytes(encoded)
 }

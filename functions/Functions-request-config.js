@@ -29,10 +29,10 @@ function getSourceConfig(source) {
           .readFileSync("./functions/sources/work-verification-source.js")
           .toString(),
         args: [
-          "Qmbi73JQdBVuLYUMDamKS3Z42uQf54MP1L2WFxKLUCmJuk", // CUSTOMER SUBMISSION HASH
-          "QmUCMNYFoJAoaX21CeVBChvwXUqbXPSEBouAGci283Bi1d", // REPORT HASH
-          "Vincent van Gogh", // CERTIFICATE ARTIST
-          "Knotberken", // CERTIFICATE WORK TITLE
+          "QmXe7nD33yCx9MRBzuX5PjYxKG5iFf3tHiLkjp6Lsp2nwD", // CUSTOMER SUBMISSION HASH
+          "QmcMAKn11ZCFuxCU8DP6iKt2pWY9fcW1HMTXyVuz7iNCNw", // REPORT HASH
+          "CLAUDE MONET", // CERTIFICATE ARTIST
+          "waterloo bridge, brouillard", // CERTIFICATE WORK TITLE
         ],
       }
     case "certificate-extraction":
@@ -59,7 +59,7 @@ function getSourceConfig(source) {
   }
 }
 
-const activeConfig = getSourceConfig("certificate-extraction")
+const activeConfig = getSourceConfig("work-verification")
 
 const requestConfig = {
   codeLocation: Location.Inline,
