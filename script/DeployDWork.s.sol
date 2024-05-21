@@ -6,12 +6,19 @@ import {HelperConfig} from "./HelperConfig.s.sol";
 import {dWork} from "../src/dWork.sol";
 
 contract DeployDWork is Script {
-    address WORK_VERIFIER_CONTRACT = 0xDd8dcbBb8588D179b98BA9CF3F7E108195B4A4BE;
-    address WORK_SHARES_MANAGER = 0x2E2c641F61b1b6144Be9558b714F7Db52A5f9f60;
+    address WORK_VERIFIER_CONTRACT = 0x7Fd5fF811f9ffffb66cF05b225dc4c13B35a9bA2;
+    address WORK_SHARES_MANAGER = 0xAaA9fBaFb9a8AbB649f8577065aaa42A4A90E567;
 
     function run() external returns (dWork) {
+        HelperConfig helperConfig = new HelperConfig();
+        (, , address priceFeed, ) = helperConfig.activeNetworkConfig();
+
         vm.startBroadcast();
-        dWork newDWork = new dWork(WORK_SHARES_MANAGER, WORK_VERIFIER_CONTRACT);
+        dWork newDWork = new dWork(
+            WORK_SHARES_MANAGER,
+            WORK_VERIFIER_CONTRACT,
+            priceFeed
+        );
         vm.stopBroadcast();
         return newDWork;
     }

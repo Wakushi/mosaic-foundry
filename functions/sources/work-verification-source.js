@@ -28,13 +28,12 @@ async function fetchArtistData(artistId) {
     },
   })
   if (response.error) {
-    throw new Error(JSON.stringify(response))
+    throw new Error("Error fetching artist data")
   }
   return response.data.data.artist
 }
 
-async function fetchWorkDetails(workTitle, permalink) {
-  const url = `${workTitle.toLowerCase()}-${permalink}`
+async function fetchWorkDetails(permalink) {
   const response = await Functions.makeHttpRequest({
     url: `https://pricedb.ms.masterworks.io/graphql`,
     method: "POST",
@@ -44,39 +43,46 @@ async function fetchWorkDetails(workTitle, permalink) {
     data: {
       operationName: "ArtworkForAdmin",
       variables: {
-        url_id: url, // ex: "knotberken-w:038e7b184c25ad9"
+        permalink: permalink, // ex: "w:038e7b184c25ad9"
       },
       query:
-        "query ArtworkForAdmin($url_id: String, $permalink: String) {\n  artwork: work(permalink: $permalink, url_id: $url_id) {\n    permalink\n    artistPermalink\n    workTitle\n    imageLink\n    irr\n    totalReturn\n    notes\n    medium\n    heightCM\n    widthCM\n    spreadsheetId\n    internalNotes\n    sales {\n      date\n      permalink\n      priceUSD\n      lowEstimateUSD\n      highEstimateUSD\n      internalNotes\n      lotNumber\n      notes\n      currency\n      workTitle\n      __typename\n    }\n    moic\n    firstSaleDate\n    lastSaleDate\n    firstSalePrice\n    lastSalePrice\n    __typename\n  }\n}",
+        "query ArtworkForAdmin($permalink: String) {\n  artwork: work(permalink: $permalink) {\n    permalink\n    artistPermalink\n    workTitle\n    imageLink\n    irr\n    totalReturn\n    notes\n    medium\n    heightCM\n    widthCM\n    spreadsheetId\n    internalNotes\n    sales {\n      date\n      permalink\n      priceUSD\n      lowEstimateUSD\n      highEstimateUSD\n      internalNotes\n      lotNumber\n      notes\n      currency\n      workTitle\n      __typename\n    }\n    moic\n    firstSaleDate\n    lastSaleDate\n    firstSalePrice\n    lastSalePrice\n    __typename\n  }\n}",
     },
   })
   if (response.error) {
-    console.log("error", response)
-    throw new Error(JSON.stringify(response))
+    throw new Error("Error fetching work details")
   }
   return response.data.data.artwork
 }
 
 async function fetchWorkMarketData(work) {
-  const artist = await fetchArtistData(formatArtistNameMW(work.artist))
-  const externalWork = artist.works.find(
-    (workMW) => workMW.workTitle === work.title
-  )
-  const { workTitle, permalink } = externalWork
-  const marketData = await fetchWorkDetails(workTitle, permalink)
-  return {
-    title: marketData.workTitle,
-    artist: artist.artistName,
-    lastSaleDate: marketData.lastSaleDate,
-    lastSalePrice: marketData.lastSalePrice,
+  try {
+    const artist = await fetchArtistData(formatArtistNameMW(work.artist))
+    const externalWork = artist.works.find(
+      (workMW) => workMW.workTitle === work.title
+    )
+    const { permalink } = externalWork
+    const marketData = await fetchWorkDetails(permalink)
+    return {
+      title: marketData.workTitle,
+      artist: artist.artistName,
+      lastSaleDate: marketData.lastSaleDate,
+      lastSalePrice: marketData.lastSalePrice,
+    }
+  } catch (error) {
+    throw new Error("Error fetching work market data")
   }
 }
 
 async function fetchCustomerWork(workHash) {
-  const work = await Functions.makeHttpRequest({
-    url: `${MOSAIC_API_BASE_URL}/${workHash}`,
-  })
-  return work.data
+  try {
+    const work = await Functions.makeHttpRequest({
+      url: `${MOSAIC_API_BASE_URL}/${workHash}`,
+    })
+    return work.data
+  } catch (error) {
+    throw new Error("Error fetching customer work data")
+  }
 }
 
 async function fetchReport(reportHash) {
@@ -165,30 +171,35 @@ if (!secrets.openaiApiKey) {
   throw new Error("OpenAI API key is required")
 }
 
-const aggregatedData = await aggregateWorkData(
-  customerSubmissionHash,
-  reportHash
-)
-
-const organizedData = await organizeData(aggregatedData)
-const sanitizedData = {} // { "artist": [], "title": [], "price": [], "customerAndOwnerName": [] }
-
-Object.entries(JSON.parse(organizedData)).forEach(([key, collection]) => {
-  collection = collection.filter((value) => value)
-  sanitizedData[key] = collection
-})
-
-sanitizedData.artist.push(certificateArtist)
-sanitizedData.title.push(certificateWorkTitle)
-
-const discrepancies = getDiscrepancies(sanitizedData)
-
-if (discrepancies.length > 0) {
-  throw new Error(JSON.stringify(discrepancies))
-} else {
-  const encoded = abiCoder.encode(
-    ["string", "uint256"],
-    [sanitizedData.customerAndOwnerName[0], sanitizedData.price[0]]
+try {
+  const aggregatedData = await aggregateWorkData(
+    customerSubmissionHash,
+    reportHash
   )
+  const organizedData = await organizeData(aggregatedData)
+  const sanitizedData = {} // { "artist": [], "title": [], "price": [], "customerAndOwnerName": [] }
+
+  Object.entries(JSON.parse(organizedData)).forEach(([key, collection]) => {
+    collection = collection.filter((value) => value)
+    sanitizedData[key] = collection
+  })
+
+  sanitizedData.artist.push(certificateArtist)
+  sanitizedData.title.push(certificateWorkTitle)
+
+  const discrepancies = getDiscrepancies(sanitizedData)
+
+  if (discrepancies.length > 0) {
+    const encoded = abiCoder.encode(["string", "uint256"], ["error", 0])
+    return ethers.getBytes(encoded)
+  } else {
+    const encoded = abiCoder.encode(
+      ["string", "uint256"],
+      [sanitizedData.customerAndOwnerName[0], sanitizedData.price[0]]
+    )
+    return ethers.getBytes(encoded)
+  }
+} catch (error) {
+  const encoded = abiCoder.encode(["string", "uint256"], ["error", 0])
   return ethers.getBytes(encoded)
 }

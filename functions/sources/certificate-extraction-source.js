@@ -14,7 +14,7 @@ async function analyzeCertificate(imageURL) {
     },
     data: {
       model: "gpt-4o",
-      seed: 7,
+      seed: 10,
       response_format: { type: "json_object" },
       messages: [
         {
@@ -22,7 +22,7 @@ async function analyzeCertificate(imageURL) {
           content: [
             {
               type: "text",
-              text: "Analyze the image which is an artwork certificate of authenticity and extract the following information in a JSON format: { artist: 'value', title: 'value', year: 'value' }",
+              text: "Analyze the image which is an artwork certificate of authenticity and extract the following information in a JSON format: { artist: 'value', title: 'value' }. If the information is not available, please return the object but with empty values.",
             },
             {
               type: "image_url",
@@ -38,7 +38,6 @@ async function analyzeCertificate(imageURL) {
   })
 
   if (openAIRequest.error) {
-    console.log(openAIRequest)
     throw new Error(openAIRequest.error)
   }
   const stringResult = openAIRequest.data.choices[0].message.content
@@ -52,10 +51,26 @@ if (!secrets.openaiApiKey) {
   throw new Error("OpenAI API key is required")
 }
 
-const imageURL = `${IPFS_BASE_URL}/${certificateImageHash}`
-const result = await analyzeCertificate(imageURL)
-const analyzedData = JSON.parse(result)
-const { artist, title, year } = analyzedData
+try {
+  const imageURL = `${IPFS_BASE_URL}/${certificateImageHash}`
+  const result = await analyzeCertificate(imageURL)
+  const analyzedData = JSON.parse(result)
+  const { artist, title } = analyzedData
 
-const encoded = abiCoder.encode(["string", "string"], [artist, title])
-return ethers.getBytes(encoded)
+  if (!artist || !title) {
+    const encoded = abiCoder.encode(
+      ["string", "string"],
+      ["error", "Error extracting certificate information"]
+    )
+    return ethers.getBytes(encoded)
+  } else {
+    const encoded = abiCoder.encode(["string", "string"], [artist, title])
+    return ethers.getBytes(encoded)
+  }
+} catch (error) {
+  const encoded = abiCoder.encode(
+    ["string", "string"],
+    ["error", JSON.stringify(error)]
+  )
+  return ethers.getBytes(encoded)
+}

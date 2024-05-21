@@ -32,7 +32,6 @@ contract dWorkSharesManager is ERC1155, Ownable {
     // State variables
     ///////////////////
 
-    // Chainlink Data Feed
     AggregatorV3Interface private s_priceFeed;
 
     address s_dWork;

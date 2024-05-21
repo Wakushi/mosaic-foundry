@@ -59,7 +59,7 @@ function getSourceConfig(source) {
   }
 }
 
-const activeConfig = getSourceConfig("work-verification")
+const activeConfig = getSourceConfig("certificate-extraction")
 
 const requestConfig = {
   codeLocation: Location.Inline,
