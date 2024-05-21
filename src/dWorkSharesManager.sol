@@ -200,7 +200,7 @@ contract dWorkSharesManager is ERC1155, Ownable {
         uint256 _sharesTokenId,
         uint256 _amount,
         uint256 _priceUsd
-    ) external whenSharesNotPaused(_sharesTokenId) {
+    ) external whenSharesNotPaused(_sharesTokenId) returns (uint256) {
         if (_sharesTokenId == 0) {
             revert dWorkSharesManager__TokenIdDoesNotExist();
         }
@@ -239,6 +239,8 @@ contract dWorkSharesManager is ERC1155, Ownable {
             _priceUsd,
             msg.sender
         );
+
+        return s_marketShareItemId;
     }
 
     function buyMarketShareItem(uint256 _marketShareItemId) external payable {
