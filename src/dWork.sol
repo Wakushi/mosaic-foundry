@@ -644,8 +644,13 @@ contract dWork is
 
     function _mintWork(uint256 _tokenizationRequestId) internal {
         ++s_tokenId;
-        s_tokenizationRequests[_tokenizationRequestId].isMinted = true;
-        s_tokenizationRequests[_tokenizationRequestId].workTokenId = s_tokenId;
+        TokenizedWork storage tokenizedWork = s_tokenizationRequests[
+            _tokenizationRequestId
+        ];
+        tokenizedWork.isMinted = true;
+        tokenizedWork.workTokenId = s_tokenId;
+        s_tokenizedWorkByTokenId[s_tokenId] = tokenizedWork;
+
         _safeMint(
             s_tokenizationRequests[_tokenizationRequestId].owner,
             s_tokenId
