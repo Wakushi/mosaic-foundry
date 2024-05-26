@@ -11,13 +11,24 @@ contract DeployDWork is Script {
 
     function run() external returns (dWork) {
         HelperConfig helperConfig = new HelperConfig();
-        (, , address priceFeed, ) = helperConfig.activeNetworkConfig();
+        (
+            ,
+            ,
+            address priceFeed,
+            ,
+            address ccipRouterAddress,
+            address linkTokenAddress,
+            uint64 chainSelector
+        ) = helperConfig.activeNetworkConfig();
 
         vm.startBroadcast();
         dWork newDWork = new dWork(
             WORK_SHARES_MANAGER,
             WORK_VERIFIER_CONTRACT,
-            priceFeed
+            priceFeed,
+            ccipRouterAddress,
+            linkTokenAddress,
+            chainSelector
         );
         vm.stopBroadcast();
         return newDWork;

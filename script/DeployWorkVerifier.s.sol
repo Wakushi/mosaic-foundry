@@ -45,7 +45,10 @@ contract DeployWorkVerifier is Script {
             bytes32 donId,
             address functionsRouter,
             ,
-            uint64 functionsSubId
+            uint64 functionsSubId,
+            ,
+            ,
+
         ) = helperConfig.activeNetworkConfig();
 
         string memory verificationSource = vm.readFile(WORK_VERIFIATION_SOURCE);

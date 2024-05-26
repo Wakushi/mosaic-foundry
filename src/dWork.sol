@@ -2,18 +2,27 @@
 
 pragma solidity ^0.8.19;
 
+// Chainlink
+import {Log, ILogAutomation} from "@chainlink/contracts/src/v0.8/automation/interfaces/ILogAutomation.sol";
+import {Client} from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
+import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IRouterClient.sol";
+import {IAny2EVMMessageReceiver} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IAny2EVMMessageReceiver.sol";
+import {LinkTokenInterface} from "@chainlink/contracts/src/v0.8/shared/interfaces/LinkTokenInterface.sol";
+// OpenZeppelin
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {ERC721URIStorage} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import {ERC721Burnable} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721Burnable.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Base64} from "@openzeppelin/contracts/utils/Base64.sol";
+// Custom
 import {AggregatorV3Interface} from "./libraries/OracleLib.sol";
 import {PriceConverter} from "./libraries/PriceConverter.sol";
-import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IDWorkSharesManager} from "./interfaces/IDWorkSharesManager.sol";
 import {IWorkVerifier} from "./interfaces/IWorkVerifier.sol";
-import {Log, ILogAutomation} from "@chainlink/contracts/src/v0.8/automation/interfaces/ILogAutomation.sol";
 import {IDWorkConfig} from "./interfaces/IDWorkConfig.sol";
 
 contract dWork is
@@ -22,15 +31,15 @@ contract dWork is
     ERC721URIStorage,
     ERC721Burnable,
     Ownable,
-    Pausable
+    Pausable,
+    IAny2EVMMessageReceiver,
+    ReentrancyGuard
 {
     ///////////////////
     // Type declarations
     ///////////////////
 
     using PriceConverter for uint256;
-
-    AggregatorV3Interface private s_priceFeed;
 
     enum VerificationStep {
         PendingCertificateAnalysis,
@@ -40,12 +49,17 @@ contract dWork is
         Tokenized
     }
 
+    enum PayFeesIn {
+        Native,
+        LINK
+    }
+
     struct TokenizedWork {
         string customerSubmissionIPFSHash;
         string appraiserReportIPFSHash;
         string certificateIPFSHash;
         address owner;
-        string initialOwnerName;
+        string ownerName;
         uint256 lastWorkPriceUsd;
         uint256 workTokenId;
         uint256 sharesTokenId;
@@ -64,9 +78,25 @@ contract dWork is
         string work;
     }
 
+    struct xChainWorkTokenTransferData {
+        address from;
+        address to;
+        uint256 workTokenId;
+    }
+
     ///////////////////
     // State variables
     ///////////////////
+
+    // Chainlink CCIP
+    uint256 constant POLYGON_AMOY_CHAIN_ID = 80002;
+    IRouterClient internal immutable i_ccipRouter;
+    uint64 private immutable i_currentChainSelector;
+    LinkTokenInterface internal immutable i_linkToken;
+    mapping(uint64 destChainSelector => address xWorkAddress) s_chains;
+
+    // Chainlink Price Feed
+    AggregatorV3Interface private s_priceFeed;
 
     /**
      * @dev The tokenizationRequestId is a unique identifier for each tokenization request.
@@ -75,8 +105,6 @@ contract dWork is
      */
     uint256 s_tokenizationRequestId;
     uint256 s_tokenId;
-
-    bytes public s_lastPerformData;
 
     mapping(uint256 tokenizationRequestId => TokenizedWork tokenizedWork) s_tokenizationRequests;
     mapping(address customer => uint256[] tokenizationRequestsIds) s_customerTokenizationRequests;
@@ -89,8 +117,7 @@ contract dWork is
     address s_workSharesManager;
     address s_workVerifier;
 
-    bytes s_lastVerifierResponse;
-    bytes s_lastVerifierError;
+    bytes s_lastPerformData;
 
     ///////////////////
     // Events
@@ -126,6 +153,20 @@ contract dWork is
         uint256 tokenizationRequestId,
         string indexed errorMessage
     );
+    event CrossChainSent(
+        address from,
+        address to,
+        uint256 tokenId,
+        uint64 sourceChainSelector,
+        uint64 destinationChainSelector
+    );
+    event CrossChainReceived(
+        address from,
+        address to,
+        uint256 tokenId,
+        uint64 sourceChainSelector,
+        uint64 destinationChainSelector
+    );
 
     //////////////////
     // Errors
@@ -140,6 +181,11 @@ contract dWork is
     error dWork__TokenPaused();
     error dWork__NotWorkOwner();
     error dWork__NotEnoughValueSent();
+    error dWork__InvalidRouter();
+    error dWork__ChainNotEnabled();
+    error dWork__SenderNotEnabled();
+    error dWork__NotEnoughBalanceForFees();
+    error dWork__OnlyOnPolygonAmoy();
 
     //////////////////
     // Modifiers
@@ -168,6 +214,34 @@ contract dWork is
         _;
     }
 
+    modifier onlyRouter() {
+        if (msg.sender != address(i_ccipRouter)) {
+            revert dWork__InvalidRouter();
+        }
+        _;
+    }
+
+    modifier onlyEnabledChain(uint64 _chainSelector) {
+        if (s_chains[_chainSelector] == address(0)) {
+            revert dWork__ChainNotEnabled();
+        }
+        _;
+    }
+
+    modifier onlyEnabledSender(uint64 _chainSelector, address _sender) {
+        if (s_chains[_chainSelector] != _sender) {
+            revert dWork__SenderNotEnabled();
+        }
+        _;
+    }
+
+    modifier onlyOnPolygonAmoy() {
+        if (block.chainid != POLYGON_AMOY_CHAIN_ID) {
+            revert dWork__OnlyOnPolygonAmoy();
+        }
+        _;
+    }
+
     //////////////////
     // Functions
     //////////////////
@@ -175,11 +249,18 @@ contract dWork is
     constructor(
         address _workSharesManager,
         address _workVerifier,
-        address _priceFeed
+        address _priceFeed,
+        address _ccipRouterAddress,
+        address _linkTokenAddress,
+        uint64 _currentChainSelector
     ) Ownable(msg.sender) ERC721("xWork", "xWORK") {
         s_workSharesManager = _workSharesManager;
         s_workVerifier = _workVerifier;
         s_priceFeed = AggregatorV3Interface(_priceFeed);
+        if (_ccipRouterAddress == address(0)) revert dWork__InvalidRouter();
+        i_ccipRouter = IRouterClient(_ccipRouterAddress);
+        i_linkToken = LinkTokenInterface(_linkTokenAddress);
+        i_currentChainSelector = _currentChainSelector;
     }
 
     ////////////////////
@@ -202,27 +283,15 @@ contract dWork is
         external
         onlyOwner
         notZeroAddress(_customer)
+        onlyOnPolygonAmoy
         returns (uint256 tokenizationRequestId)
     {
-        ++s_tokenizationRequestId;
-        s_tokenizationRequests[s_tokenizationRequestId] = TokenizedWork({
-            customerSubmissionIPFSHash: _customerSubmissionIPFSHash,
-            appraiserReportIPFSHash: _appraiserReportIPFSHash,
-            certificateIPFSHash: _certificateIPFSHash,
-            owner: _customer,
-            initialOwnerName: "",
-            lastWorkPriceUsd: 0,
-            workTokenId: 0,
-            sharesTokenId: 0,
-            lastVerifiedAt: 0,
-            listingPriceUsd: 0,
-            isMinted: false,
-            isFractionalized: false,
-            isPaused: false,
-            isListed: false,
-            verificationStep: VerificationStep.PendingCertificateAnalysis,
-            certificate: WorkCertificate({artist: "", work: ""})
-        });
+        _createTokenizationRequest(
+            _customerSubmissionIPFSHash,
+            _appraiserReportIPFSHash,
+            _certificateIPFSHash,
+            _customer
+        );
 
         s_customerTokenizationRequests[_customer].push(s_tokenizationRequestId);
 
@@ -472,6 +541,123 @@ contract dWork is
         s_workVerifier = _workVerifier;
     }
 
+    function xChainWorkTokenTransfer(
+        address _from,
+        address _to,
+        uint256 _workTokenId,
+        uint64 _destinationChainSelector,
+        PayFeesIn _payFeesIn,
+        uint256 _gasLimit
+    )
+        external
+        nonReentrant
+        onlyEnabledChain(_destinationChainSelector)
+        returns (bytes32 messageId)
+    {
+        _burn(_workTokenId);
+
+        xChainWorkTokenTransferData memory data = xChainWorkTokenTransferData({
+            from: _from,
+            to: _to,
+            workTokenId: _workTokenId
+        });
+
+        bytes memory encodedArgs = _encodeArgs(data);
+
+        Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
+            receiver: abi.encode(s_chains[_destinationChainSelector]),
+            data: encodedArgs,
+            tokenAmounts: new Client.EVMTokenAmount[](0),
+            extraArgs: Client._argsToBytes(
+                Client.EVMExtraArgsV1({gasLimit: _gasLimit})
+            ),
+            feeToken: _payFeesIn == PayFeesIn.LINK
+                ? address(i_linkToken)
+                : address(0)
+        });
+
+        uint256 fees = i_ccipRouter.getFee(_destinationChainSelector, message);
+
+        if (_payFeesIn == PayFeesIn.LINK) {
+            if (fees > i_linkToken.balanceOf(address(this))) {
+                revert dWork__NotEnoughBalanceForFees();
+            }
+
+            i_linkToken.approve(address(i_ccipRouter), fees);
+
+            messageId = i_ccipRouter.ccipSend(
+                _destinationChainSelector,
+                message
+            );
+        } else {
+            if (fees > address(this).balance) {
+                revert dWork__NotEnoughBalanceForFees();
+            }
+
+            messageId = i_ccipRouter.ccipSend{value: fees}(
+                _destinationChainSelector,
+                message
+            );
+        }
+
+        emit CrossChainSent(
+            _from,
+            _to,
+            _workTokenId,
+            i_currentChainSelector,
+            _destinationChainSelector
+        );
+    }
+
+    function ccipReceive(
+        Client.Any2EVMMessage calldata message
+    )
+        external
+        virtual
+        override
+        onlyRouter
+        nonReentrant
+        onlyEnabledChain(message.sourceChainSelector)
+        onlyEnabledSender(
+            message.sourceChainSelector,
+            abi.decode(message.sender, (address))
+        )
+    {
+        uint64 sourceChainSelector = message.sourceChainSelector;
+        (address from, address to, uint256 tokenId) = abi.decode(
+            message.data,
+            (address, address, uint256)
+        );
+
+        _safeMint(to, tokenId);
+        // _createTokenizedWork("", "", "", to);
+
+        emit CrossChainReceived(
+            from,
+            to,
+            tokenId,
+            sourceChainSelector,
+            i_currentChainSelector
+        );
+    }
+
+    function enableChain(
+        uint64 _chainSelector,
+        address _xWorkAddress
+    ) external onlyOwner {
+        s_chains[_chainSelector] = _xWorkAddress;
+    }
+
+    function pauseWorkToken(uint256 _tokenizationRequestId) external onlyOwner {
+        _pauseWorkToken(_tokenizationRequestId);
+    }
+
+    function unpauseWorkToken(
+        uint256 _tokenizationRequestId
+    ) external onlyOwner {
+        _unpauseWorkToken(_tokenizationRequestId);
+    }
+
     ////////////////////
     // Internal
     ////////////////////
@@ -588,24 +774,24 @@ contract dWork is
         ];
         if (
             (keccak256(abi.encodePacked(_ownerName)) !=
-                keccak256(abi.encodePacked(tokenizedWork.initialOwnerName))) ||
+                keccak256(abi.encodePacked(tokenizedWork.ownerName))) ||
             _priceUsd != tokenizedWork.lastWorkPriceUsd
         ) {
-            _pause();
+            _pauseWorkToken(_tokenizationRequestId);
             if (isFractionalized(_tokenizationRequestId)) {
                 IDWorkSharesManager(s_workSharesManager).pauseShares(
                     _tokenizationRequestId
                 );
             }
             emit LastVerificationFailed(
-                tokenizedWork.initialOwnerName,
+                tokenizedWork.ownerName,
                 tokenizedWork.lastWorkPriceUsd,
                 _ownerName,
                 _priceUsd
             );
         } else {
-            if (paused()) {
-                _unpause();
+            if (isPaused(_tokenizationRequestId)) {
+                _unpauseWorkToken(_tokenizationRequestId);
                 IDWorkSharesManager(s_workSharesManager).unpauseShares(
                     _tokenizationRequestId
                 );
@@ -625,7 +811,7 @@ contract dWork is
         _mintWork(_tokenizationRequestId);
 
         tokenizedWork.isMinted = true;
-        tokenizedWork.initialOwnerName = _verifiedOwnerName;
+        tokenizedWork.ownerName = _verifiedOwnerName;
         tokenizedWork.lastWorkPriceUsd = _verifiedPriceUsd;
         tokenizedWork.verificationStep = VerificationStep.Tokenized;
 
@@ -647,6 +833,71 @@ contract dWork is
         );
     }
 
+    function _createTokenizationRequest(
+        string memory _customerSubmissionIPFSHash,
+        string memory _appraiserReportIPFSHash,
+        string memory _certificateIPFSHash,
+        address _customer
+    ) internal returns (uint256 tokenizationRequestId) {
+        ++s_tokenizationRequestId;
+        s_tokenizationRequests[s_tokenizationRequestId] = TokenizedWork({
+            customerSubmissionIPFSHash: _customerSubmissionIPFSHash,
+            appraiserReportIPFSHash: _appraiserReportIPFSHash,
+            certificateIPFSHash: _certificateIPFSHash,
+            owner: _customer,
+            ownerName: "",
+            lastWorkPriceUsd: 0,
+            workTokenId: 0,
+            sharesTokenId: 0,
+            lastVerifiedAt: 0,
+            listingPriceUsd: 0,
+            isMinted: false,
+            isFractionalized: false,
+            isPaused: false,
+            isListed: false,
+            verificationStep: VerificationStep.PendingCertificateAnalysis,
+            certificate: WorkCertificate({artist: "", work: ""})
+        });
+        return s_tokenizationRequestId;
+    }
+
+    function _createTokenizedWork(
+        string memory _customerSubmissionIPFSHash,
+        string memory _appraiserReportIPFSHash,
+        string memory _certificateIPFSHash,
+        address _customer,
+        string memory _ownerName,
+        uint256 _lastWorkPriceUsd,
+        string memory _artist,
+        string memory _work,
+        uint256 _sharesTokenId
+    ) internal {
+        uint256 tokenizationRequestId = _createTokenizationRequest(
+            _customerSubmissionIPFSHash,
+            _appraiserReportIPFSHash,
+            _certificateIPFSHash,
+            _customer
+        );
+
+        TokenizedWork storage tokenizedWork = s_tokenizationRequests[
+            tokenizationRequestId
+        ];
+
+        tokenizedWork.ownerName = _ownerName;
+        tokenizedWork.lastWorkPriceUsd = _lastWorkPriceUsd;
+        tokenizedWork.verificationStep = VerificationStep.Tokenized;
+        tokenizedWork.isMinted = true;
+        tokenizedWork.certificate = WorkCertificate({
+            artist: _artist,
+            work: _work
+        });
+
+        if (_sharesTokenId != 0) {
+            tokenizedWork.sharesTokenId = _sharesTokenId;
+            tokenizedWork.isFractionalized = true;
+        }
+    }
+
     function _updateTokenizedWorkOnSale(
         TokenizedWork memory tokenizedWork,
         uint256 _soldValueUsd
@@ -657,7 +908,7 @@ contract dWork is
             appraiserReportIPFSHash: tokenizedWork.appraiserReportIPFSHash,
             certificateIPFSHash: tokenizedWork.certificateIPFSHash,
             owner: msg.sender,
-            initialOwnerName: tokenizedWork.initialOwnerName,
+            ownerName: tokenizedWork.ownerName,
             lastWorkPriceUsd: _soldValueUsd,
             workTokenId: tokenizedWork.workTokenId,
             sharesTokenId: 0,
@@ -672,6 +923,25 @@ contract dWork is
         });
 
         s_tokenizedWorkByTokenId[tokenizedWork.workTokenId] = updatedWork;
+    }
+
+    function _pauseWorkToken(uint256 _tokenizationRequestId) internal {
+        s_tokenizationRequests[_tokenizationRequestId].isPaused = true;
+    }
+
+    function _unpauseWorkToken(uint256 _tokenizationRequestId) internal {
+        s_tokenizationRequests[_tokenizationRequestId].isPaused = false;
+    }
+
+    function _encodeArgs(
+        xChainWorkTokenTransferData memory _encodeTokenTransferData
+    ) internal pure returns (bytes memory) {
+        bytes memory encodedArgs = abi.encode(
+            _encodeTokenTransferData.from,
+            _encodeTokenTransferData.to,
+            _encodeTokenTransferData.workTokenId
+        );
+        return encodedArgs;
     }
 
     function _ensureNotZeroAddress(address _address) internal pure {
@@ -774,14 +1044,6 @@ contract dWork is
         return s_workVerifier;
     }
 
-    function getLastVerifierResponse() public view returns (bytes memory) {
-        return s_lastVerifierResponse;
-    }
-
-    function getLastVerifierError() public view returns (bytes memory) {
-        return s_lastVerifierError;
-    }
-
     function isMinted(
         uint256 _tokenizationRequestId
     ) public view returns (bool) {
@@ -792,6 +1054,12 @@ contract dWork is
         uint256 _tokenizationRequestId
     ) public view returns (bool) {
         return s_tokenizationRequests[_tokenizationRequestId].isFractionalized;
+    }
+
+    function isPaused(
+        uint256 _tokenizationRequestId
+    ) public view returns (bool) {
+        return s_tokenizationRequests[_tokenizationRequestId].isPaused;
     }
 
     function bytes32ToUint256(bytes32 _uint) public pure returns (uint256) {

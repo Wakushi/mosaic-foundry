@@ -12,6 +12,9 @@ contract HelperConfig is Script {
         address functionsRouter;
         address priceFeed;
         uint64 functionsSubId;
+        address ccipRouterAddress;
+        address linkTokenAddress;
+        uint64 chainSelector;
     }
 
     uint256 public constant DEFAULT_ANVIL_KEY =
@@ -21,27 +24,13 @@ contract HelperConfig is Script {
     NetworkConfig public activeNetworkConfig;
 
     constructor() {
-        if (block.chainid == 11155111) {
-            activeNetworkConfig = getSepoliaEthConfig();
-        } else if (block.chainid == 80002) {
+        if (block.chainid == 80002) {
             activeNetworkConfig = getPolygonAmoyConfig();
-        } else if (block.chainid == 84532) {
-            activeNetworkConfig = getBaseSepoliaConfig();
-        } else if (block.chainid == 421614) {
-            activeNetworkConfig = getArbitrumSepoliaConfig();
+        } else if (block.chainid == 11155420) {
+            activeNetworkConfig = getOptimismSepoliaConfig();
         } else {
             activeNetworkConfig = getOrCreateAnvilEthConfig();
         }
-    }
-
-    function getSepoliaEthConfig() public pure returns (NetworkConfig memory) {
-        return
-            NetworkConfig({
-                donId: bytes32("fun-ethereum-sepolia-1"),
-                functionsRouter: 0xb83E47C2bC239B3bf370bc41e1459A34b41238D0,
-                priceFeed: 0x694AA1769357215DE4FAC081bf1f309aDC325306,
-                functionsSubId: 2755
-            });
     }
 
     function getPolygonAmoyConfig() public pure returns (NetworkConfig memory) {
@@ -50,31 +39,27 @@ contract HelperConfig is Script {
                 donId: bytes32("fun-polygon-amoy-1"),
                 functionsRouter: 0xC22a79eBA640940ABB6dF0f7982cc119578E11De,
                 priceFeed: 0x001382149eBa3441043c1c66972b4772963f5D43,
-                functionsSubId: 212
+                functionsSubId: 212,
+                ccipRouterAddress: 0x9C32fCB86BF0f4a1A8921a9Fe46de3198bb884B2,
+                linkTokenAddress: 0x0Fd9e8d3aF1aaee056EB9e802c3A762a667b1904,
+                chainSelector: 16281711391670634445
             });
     }
 
-    function getArbitrumSepoliaConfig()
+    function getOptimismSepoliaConfig()
         public
         pure
         returns (NetworkConfig memory)
     {
         return
             NetworkConfig({
-                donId: bytes32("fun-arbitrum-sepolia-1"),
-                functionsRouter: 0x234a5fb5Bd614a7AA2FfAB244D603abFA0Ac5C5C,
-                priceFeed: 0xd30e2101a97dcbAeBCBC04F14C3f624E67A35165,
-                functionsSubId: 65
-            });
-    }
-
-    function getBaseSepoliaConfig() public pure returns (NetworkConfig memory) {
-        return
-            NetworkConfig({
-                donId: bytes32("fun-base-sepolia-1"),
-                functionsRouter: 0xf9B8fc078197181C841c296C876945aaa425B278,
-                priceFeed: 0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1,
-                functionsSubId: 41
+                donId: bytes32("fun-optimism-sepolia-1"),
+                functionsRouter: 0xC17094E3A1348E5C7544D4fF8A36c28f2C6AAE28,
+                priceFeed: 0x001382149eBa3441043c1c66972b4772963f5D43,
+                functionsSubId: 192,
+                ccipRouterAddress: 0x114A20A10b43D4115e5aeef7345a1A71d2a60C57,
+                linkTokenAddress: 0xE4aB69C077896252FAFBD49EFD26B5D171A32410,
+                chainSelector: 5224473277236331295
             });
     }
 
@@ -91,7 +76,7 @@ contract HelperConfig is Script {
         //     baseFee,
         //     gasPriceLink
         // );
-        // LinkToken link = new LinkToken();
+        LinkToken link = new LinkToken();
         MockV3Aggregator mockPriceFeed = new MockV3Aggregator(
             DECIMALS,
             INITIAL_PRICE
@@ -103,7 +88,10 @@ contract HelperConfig is Script {
                 donId: bytes32("fun-ethereum-sepolia-1"),
                 functionsRouter: 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419,
                 priceFeed: address(mockPriceFeed),
-                functionsSubId: 0
+                functionsSubId: 0,
+                ccipRouterAddress: 0x9C32fCB86BF0f4a1A8921a9Fe46de3198bb884B2,
+                linkTokenAddress: address(link),
+                chainSelector: 0
             });
     }
 }

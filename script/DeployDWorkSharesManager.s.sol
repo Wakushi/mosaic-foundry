@@ -11,7 +11,7 @@ contract DeployDWorkSharesManager is Script {
 
     function run() external returns (dWorkSharesManager) {
         HelperConfig helperConfig = new HelperConfig();
-        (, , address priceFeed, ) = helperConfig.activeNetworkConfig();
+        (, , address priceFeed, , , , ) = helperConfig.activeNetworkConfig();
 
         vm.startBroadcast();
         dWorkSharesManager newDWorkShare = new dWorkSharesManager(
