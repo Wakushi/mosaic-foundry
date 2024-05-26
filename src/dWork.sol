@@ -29,47 +29,46 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
     ///////////////////
 
     // Chainlink Price Feed
-    AggregatorV3Interface private s_priceFeed;
+    AggregatorV3Interface s_priceFeed;
 
-    mapping(address customer => uint256[] tokenizationRequestsIds) s_customerTokenizationRequests;
-    mapping(uint256 tokenizationRequestId => uint256 sharesTokenId) s_sharesTokenIds;
-
-    uint256 constant PROTOCOL_FEE_PERCENTAGE = 30; // 3%
-    uint256 s_protocolFees;
     address s_workSharesManager;
     address s_workVerifier;
 
-    bytes s_lastPerformData;
+    // A collection of a customer's tokenization requests
+    mapping(address customer => uint256[] tokenizationRequestsIds) s_customerTokenizationRequests;
+    // Fees percentage taken by the protocol on work sales
+    uint256 constant PROTOCOL_FEE_PERCENTAGE = 30; // 3%
+    // Fees collected by the protocol on work sales
+    uint256 s_protocolFees;
 
     ///////////////////
     // Events
     ///////////////////
 
-    event WorkFractionalized(uint256 sharesTokenId);
     event VerificationProcess(
         uint256 tokenizationRequestId,
         VerificationStep step
     );
-    event CertificateExtracted(
-        uint256 tokenizationRequestId,
-        WorkCertificate certificate
-    );
+
     event LastVerificationFailed(
         string previousOwner,
         uint256 previousPrice,
         string newOwner,
         uint256 newPrice
     );
+
     event WorkSharesCreated(
         uint256 sharesTokenId,
         uint256 workTokenId,
         uint256 shareSupply
     );
+
     event CertificateExtractionError(
         uint256 indexed tokenizationRequestId,
         string indexed errorTitle,
         string indexed errorMessage
     );
+
     event WorkVerificationError(
         uint256 tokenizationRequestId,
         string indexed errorMessage
@@ -81,8 +80,8 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
 
     error dWork__WorkNotMinted();
     error dWork__AlreadyFractionalized();
-    error dWork__WorkVerificationNotExpected();
     error dWork__NotEnoughValueSent();
+    error dWork__InvalidIPFSHash();
 
     //////////////////
     // Modifiers
@@ -93,16 +92,12 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         _;
     }
 
+    // Ensure the order of the process is respected (e.g. The work's certificate of authenticity must be extracted before the work can be verified).
     modifier verifyProcessOrder(
         uint256 _tokenizationRequestId,
         VerificationStep _requiredStep
     ) {
         _ensureProcessOrder(_tokenizationRequestId, _requiredStep);
-        _;
-    }
-
-    modifier onlyWorkOwner(address _owner, uint256 _tokenId) {
-        _ensureWorkOwnership(_owner, _tokenId);
         _;
     }
 
@@ -139,7 +134,11 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
      * @param _appraiserReportIPFSHash The IPFS hash of the appraiser report.
      * @param _certificateIPFSHash The IPFS hash of the certificate image.
      * @param _customer The address of the customer who submitted the work.
+     *
      * @notice Open a new tokenization request for a work of art. It registers the initial data and tasks the WorkVerifier contract to extract the certificate of authenticity.
+     * This method will be called by the Mosaic Admins after the art appraisers have submitted their reports along with a scanned copy of the certificate of authenticity.
+     *
+     * @dev Only the 'minter' contract (dWork instance deployed on Polygon) can perform this function.
      */
     function openTokenizationRequest(
         string memory _customerSubmissionIPFSHash,
@@ -153,8 +152,17 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         onlyOnPolygonAmoy
         returns (uint256 tokenizationRequestId)
     {
+        if (
+            bytes(_customerSubmissionIPFSHash).length == 0 ||
+            bytes(_appraiserReportIPFSHash).length == 0 ||
+            bytes(_certificateIPFSHash).length == 0
+        ) {
+            revert dWork__InvalidIPFSHash();
+        }
+
         ++s_tokenizationRequestId;
-        _createTokenizationRequest(
+
+        _registerTokenizationRequest(
             _customerSubmissionIPFSHash,
             _appraiserReportIPFSHash,
             _certificateIPFSHash,
@@ -201,9 +209,9 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
 
     /**
      * @param _tokenizationRequestId The ID of the tokenization request.
-     * @param _shareSupply The total supply of the shares tokens.
+     * @param _shareSupply The total supply of the shares tokens to be created.
      * @param _sharePriceUsd The price of each share token in USD.
-     * @notice Fractionalize a work of art into shares tokens.
+     * @notice Fractionalize a tokenized work of art into shares tokens.
      * @dev Tasks the WorkSharesManager contract to create ERC1155 shares tokens for the work.
      * This function can only be called after the work has been minted as an ERC721 token.
      */
@@ -237,6 +245,7 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
             );
 
         tokenizedWork.sharesTokenId = sharesTokenId;
+
         emit WorkSharesCreated(
             sharesTokenId,
             tokenizedWork.workTokenId,
@@ -245,33 +254,9 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
     }
 
     /**
-     * @param _newAppraiserReportIPFSHash The IPFS hash of the latest appraiser report.
-     * @notice Update the IPFS hash of the latest appraiser report.
-     */
-    function updateLastAppraiserReportIPFSHash(
-        uint256 _tokenizationRequestId,
-        string calldata _newAppraiserReportIPFSHash
-    ) external onlyOwner {
-        s_tokenizationRequests[_tokenizationRequestId]
-            .appraiserReportIPFSHash = _newAppraiserReportIPFSHash;
-    }
-
-    /**
-     * @param _sharesTokenId The ERC1155 token ID of the work shares.
-     * @dev Set the ERC1155 token ID of the shares tokens associated with this work.
-     * This function can only be called by the factory contract after calling its createWorkShares() function.
-     */
-    function setWorkSharesTokenId(
-        uint256 _tokenizationRequestId,
-        uint256 _sharesTokenId
-    ) external onlyOwner whenNotPaused {
-        s_sharesTokenIds[_tokenizationRequestId] = _sharesTokenId;
-        emit WorkFractionalized(_sharesTokenId);
-    }
-
-    /**
      * @dev Triggered using Chainlink log-based Automation once a VerifierTaskDone event is emitted by
      * the WorkVerifier contract. It confirms that the work verification is needed and that performUpkeep() should be called.
+     * The tokenizationRequestId retrieved from the log us encoded and passed as performData to performUpkeep().
      */
     function checkLog(
         Log calldata log,
@@ -293,15 +278,19 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
     }
 
     /**
-     * @dev Called by Chainlink log-based Automation to fulfill the work verification request.
+     * @param performData The encoded tokenizationRequestId.
+     * @dev Called by Chainlink log-based Automation to fulfill the certificate extraction the work verification request.
      * It should be triggered by when the VerifierTaskDone event is emitted by the WorkVerifier contract.
      */
     function performUpkeep(bytes calldata performData) external override {
-        s_lastPerformData = performData;
         uint256 tokenizationRequestId = abi.decode(performData, (uint256));
+
+        // We retrieve the last verified data associated with our tokenization request from the WorkVerifier contract.
+        // This way we don't have to pass the data via the log and trust the performData integrity.
         IDWorkConfig.VerifiedWorkData memory lastVerifiedData = IWorkVerifier(
             s_workVerifier
         ).getLastVerifiedData(tokenizationRequestId);
+
         if (
             s_tokenizationRequests[tokenizationRequestId].verificationStep ==
             VerificationStep.PendingCertificateAnalysis
@@ -323,26 +312,37 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         }
     }
 
+    /**
+     * @param _workTokenId The ID of the work token to be listed for sale.
+     * @param _listPriceUsd The price at which the work token will be listed.
+     * @notice List a work token for sale.
+     * @dev Transfer the work token to the dWork contract and set the listing price.
+     */
     function listWorkToken(
         uint256 _listPriceUsd,
         uint256 _workTokenId
-    ) external onlyWorkOwner(msg.sender, _workTokenId) {
+    ) external {
         TokenizedWork storage tokenizedWork = s_tokenizedWorkByTokenId[
             _workTokenId
         ];
+        _ensureWorkOwner(tokenizedWork.owner);
         tokenizedWork.listingPriceUsd = _listPriceUsd;
         tokenizedWork.isListed = true;
         safeTransferFrom(msg.sender, address(this), _workTokenId, "");
     }
 
-    function unlistWorkToken(
-        uint256 _workTokenId
-    ) external onlyWorkOwner(msg.sender, _workTokenId) {
+    /**
+     * @param _workTokenId The ID of the work token to be unlisted.
+     * @notice Unlist a work token that is listed for sale.
+     * @dev Transfer the work token back to the owner and set the listing price to 0.
+     */
+    function unlistWorkToken(uint256 _workTokenId) external {
         TokenizedWork storage tokenizedWork = s_tokenizedWorkByTokenId[
             _workTokenId
         ];
-        tokenizedWork.isListed = false;
+        _ensureWorkOwner(tokenizedWork.owner);
         tokenizedWork.listingPriceUsd = 0;
+        tokenizedWork.isListed = false;
         _update(msg.sender, _workTokenId, msg.sender);
     }
 
@@ -376,6 +376,35 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         );
     }
 
+    /**
+     * @param _newAppraiserReportIPFSHash The IPFS hash of the latest appraiser report.
+     * @notice Update the IPFS hash of the latest appraiser report.
+     * It should be called by the Mosaic Admins after the appraisers have submitted their latest reports (e.g. every 3 months).
+     */
+    function updateLastAppraiserReportIPFSHash(
+        uint256 _tokenizationRequestId,
+        string calldata _newAppraiserReportIPFSHash
+    ) external onlyOwner {
+        s_tokenizationRequests[_tokenizationRequestId]
+            .appraiserReportIPFSHash = _newAppraiserReportIPFSHash;
+    }
+
+    function setCustomerSubmissionIPFSHash(
+        uint256 _tokenizationRequestId,
+        string memory _customerSubmissionIPFSHash
+    ) external onlyOwner {
+        s_tokenizationRequests[_tokenizationRequestId]
+            .customerSubmissionIPFSHash = _customerSubmissionIPFSHash;
+    }
+
+    function setCertificateIPFSHash(
+        uint256 _tokenizationRequestId,
+        string memory _certificateIPFSHash
+    ) external onlyOwner {
+        s_tokenizationRequests[_tokenizationRequestId]
+            .certificateIPFSHash = _certificateIPFSHash;
+    }
+
     function setWorkSharesManager(
         address _workSharesManager
     ) external onlyOwner {
@@ -388,9 +417,9 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
 
     function enableChain(
         uint64 _chainSelector,
-        address _xWorkAddress
+        address xWorkAddress
     ) external onlyOwner {
-        s_chains[_chainSelector] = _xWorkAddress;
+        _enableChain(_chainSelector, xWorkAddress);
     }
 
     function pauseWorkToken(uint256 _tokenizationRequestId) external onlyOwner {
@@ -413,10 +442,12 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
     ) internal {
         string[] memory _args = new string[](1);
         _args[0] = _certificateIPFSHash;
+
         IWorkVerifier(s_workVerifier).sendCertificateExtractionRequest(
             _tokenizationRequestId,
             _args
         );
+
         emit VerificationProcess(
             _tokenizationRequestId,
             VerificationStep.PendingCertificateAnalysis
@@ -429,6 +460,7 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         TokenizedWork storage tokenizedWork = s_tokenizationRequests[
             _tokenizationRequestId
         ];
+
         string[] memory _args = new string[](4);
         _args[0] = tokenizedWork.customerSubmissionIPFSHash;
         _args[1] = tokenizedWork.appraiserReportIPFSHash;
@@ -442,6 +474,7 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
             _tokenizationRequestId,
             _args
         );
+
         emit VerificationProcess(
             _tokenizationRequestId,
             VerificationStep.PendingWorkVerification
@@ -453,6 +486,7 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         string memory _artist,
         string memory _work
     ) internal {
+        // Within the Chainlink Functions request, gpt-4o is instructed to return empty strings if he can't extract the artist and work from the certificate.
         if (bytes(_artist).length == 0 || bytes(_work).length == 0) {
             emit CertificateExtractionError(
                 _tokenizationRequestId,
@@ -470,7 +504,10 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         s_tokenizationRequests[_tokenizationRequestId]
             .verificationStep = VerificationStep.CertificateAnalysisDone;
 
-        emit CertificateExtracted(_tokenizationRequestId, workCertificate);
+        emit VerificationProcess(
+            _tokenizationRequestId,
+            VerificationStep.CertificateAnalysisDone
+        );
     }
 
     function _fulfillWorkVerificationRequest(
@@ -478,6 +515,7 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         string memory _ownerName,
         uint256 _priceUsd
     ) internal {
+        // Within the Chainlink Functions request, the computation will return a price of 0 if discrepancies are found.
         if (_priceUsd == 0) {
             emit WorkVerificationError(_tokenizationRequestId, _ownerName);
             return;
@@ -489,6 +527,7 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         s_tokenizationRequests[_tokenizationRequestId].lastVerifiedAt = block
             .timestamp;
 
+        // If the work was already minted, we compare the latest appraiser report with the previous one.
         if (isMinted(_tokenizationRequestId)) {
             _compareLatestAppraiserReport(
                 _tokenizationRequestId,
@@ -548,56 +587,6 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
     // External / Public View
     ////////////////////
 
-    function getLastTokenizationRequestId() public view returns (uint256) {
-        return s_tokenizationRequestId;
-    }
-
-    function getLastTokenId() public view returns (uint256) {
-        return s_tokenId;
-    }
-
-    function getLastPerformData() public view returns (bytes memory) {
-        return s_lastPerformData;
-    }
-
-    function getTokenizationRequest(
-        uint256 _tokenizationRequestId
-    ) public view returns (TokenizedWork memory) {
-        return s_tokenizationRequests[_tokenizationRequestId];
-    }
-
-    function getTokenizationRequestStatus(
-        uint256 _tokenizationRequestId
-    ) public view returns (VerificationStep) {
-        return s_tokenizationRequests[_tokenizationRequestId].verificationStep;
-    }
-
-    function customerTokenizationRequests(
-        address _customer
-    ) public view returns (uint256[] memory) {
-        return s_customerTokenizationRequests[_customer];
-    }
-
-    function getSharesTokenId(
-        uint256 _tokenizationRequestId
-    ) public view returns (uint256) {
-        return s_sharesTokenIds[_tokenizationRequestId];
-    }
-
-    function getTokenizationRequestByWorkTokenId(
-        uint256 _workTokenId
-    ) public view returns (TokenizedWork memory) {
-        return s_tokenizedWorkByTokenId[_workTokenId];
-    }
-
-    function getWorkSharesManager() public view returns (address) {
-        return s_workSharesManager;
-    }
-
-    function getWorkVerifier() public view returns (address) {
-        return s_workVerifier;
-    }
-
     function isMinted(
         uint256 _tokenizationRequestId
     ) public view returns (bool) {
@@ -620,13 +609,43 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         return uint256(_uint);
     }
 
-    function bytes32ToString(
-        bytes32 _bytes32
-    ) public pure returns (string memory) {
-        return string(abi.encodePacked(_bytes32));
+    function getLastTokenizationRequestId() public view returns (uint256) {
+        return s_tokenizationRequestId;
     }
 
-    function toBytes(bytes32 _data) public pure returns (bytes memory) {
-        return abi.encodePacked(_data);
+    function getLastTokenId() public view returns (uint256) {
+        return s_tokenId;
+    }
+
+    function getTokenizationRequest(
+        uint256 _tokenizationRequestId
+    ) public view returns (TokenizedWork memory) {
+        return s_tokenizationRequests[_tokenizationRequestId];
+    }
+
+    function getTokenizationRequestStatus(
+        uint256 _tokenizationRequestId
+    ) public view returns (VerificationStep) {
+        return s_tokenizationRequests[_tokenizationRequestId].verificationStep;
+    }
+
+    function customerTokenizationRequests(
+        address _customer
+    ) public view returns (uint256[] memory) {
+        return s_customerTokenizationRequests[_customer];
+    }
+
+    function getTokenizationRequestByWorkTokenId(
+        uint256 _workTokenId
+    ) public view returns (TokenizedWork memory) {
+        return s_tokenizedWorkByTokenId[_workTokenId];
+    }
+
+    function getWorkSharesManager() public view returns (address) {
+        return s_workSharesManager;
+    }
+
+    function getWorkVerifier() public view returns (address) {
+        return s_workVerifier;
     }
 }

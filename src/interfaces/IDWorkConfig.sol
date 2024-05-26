@@ -15,7 +15,6 @@ interface IDWorkConfig {
     }
 
     struct xChainWorkTokenTransferData {
-        address from;
         address to;
         uint256 workTokenId;
         string ownerName;

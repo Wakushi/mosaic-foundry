@@ -44,8 +44,11 @@ contract WorkVerifier is FunctionsClient, Ownable {
     // Events
     ///////////////////
 
-    event ChainlinkRequestSent(bytes32 requestId);
+    // Emits when a Chainlink Functions task is done and is listened by Chainlink Log-based automation,
+    // to trigger the next step in the workflow (triggers _fulfillCertificateExtractionRequest() or
+    // _fulfillWorkVerificationRequest() on dWork contract).
     event VerifierTaskDone(uint256 indexed tokenizationRequestId);
+    event ChainlinkRequestSent(bytes32 requestId);
 
     //////////////////
     // Errors
@@ -82,10 +85,15 @@ contract WorkVerifier is FunctionsClient, Ownable {
     // External / Public
     ////////////////////
 
+    /**
+     * @param _tokenizationRequestId Tokenization request ID registered on dWork
+     * @param _args Arguments to be passed to the Chainlink DON, here the IPFS hash of the certificate of authenticity
+     * @dev Sends a request to the Chainlink DON to extract the artist and work name from the certificate of authenticity
+     */
     function sendCertificateExtractionRequest(
         uint256 _tokenizationRequestId,
         string[] calldata _args
-    ) external onlyWorkContract returns (bytes32 requestId) {
+    ) external onlyWorkContract {
         s_lastRequestId = _generateSendRequest(
             _args,
             s_certificateExtractionSource
@@ -95,20 +103,29 @@ contract WorkVerifier is FunctionsClient, Ownable {
             s_lastRequestId,
             WorkCFRequestType.CertificateExtraction
         );
-        return s_lastRequestId;
     }
 
+    /**
+     * @param _tokenizationRequestId Tokenization request ID registered on dWork
+     * @param _args Arguments to be passed to the Chainlink DON:
+     *                  - Customer submission's data IPFS hash;
+     *                  - Art appraiser's report data IPFS hash;
+     *                  - Artist name extracted from the certificate of authenticity;
+     *                  - Work name extracted from the certificate of authenticity;
+     * @dev Fetch and organize all data sources using OpenAI GPT-4o through Chainlink Functions.
+     * This request will fetch the data from the customer submission, the appraiser report and global market data,
+     * join the certificate data obtained by _sendCertificateExtractionRequest() and logically verify the work.
+     */
     function sendWorkVerificationRequest(
         uint256 _tokenizationRequestId,
         string[] calldata _args
-    ) external onlyWorkContract returns (bytes32 requestId) {
+    ) external onlyWorkContract {
         s_lastRequestId = _generateSendRequest(_args, s_workVerificationSource);
         _registerRequest(
             _tokenizationRequestId,
             s_lastRequestId,
             WorkCFRequestType.WorkVerification
         );
-        return s_lastRequestId;
     }
 
     function setDWorkAddress(address _dWork) external onlyOwner {
@@ -165,20 +182,15 @@ contract WorkVerifier is FunctionsClient, Ownable {
      * @param requestId Chainlink request ID
      * @param response Response from the Chainlink DON
      * @param err Error message from the Chainlink DON
-     * @dev Callback function to receive the response from the Chainlink DON after the work verification request
+     * @dev Callback function to receive the response from the Chainlink DON after the certificate extraction or work verification task is done
      */
     function fulfillRequest(
         bytes32 requestId,
         bytes memory response,
         bytes memory err
     ) internal override {
-        uint256 tokenizationRequestId = s_tokenizationRequestIdByCFRequestId[
-            requestId
-        ];
-
-        WorkCFRequestType requestType = s_tokenizationRequestType[
-            tokenizationRequestId
-        ];
+        uint256 tokenizationRequestId = getTokenizationRequestId(requestId);
+        WorkCFRequestType requestType = getRequestType(tokenizationRequestId);
 
         IDWorkConfig.VerifiedWorkData memory verifiedWorkData;
 
@@ -221,13 +233,6 @@ contract WorkVerifier is FunctionsClient, Ownable {
         _setRequestType(_tokenizationRequestId, _requestType);
     }
 
-    function _setRequestType(
-        uint256 _tokenizationRequestId,
-        WorkCFRequestType _requestType
-    ) internal {
-        s_tokenizationRequestType[_tokenizationRequestId] = _requestType;
-    }
-
     function _setTokenizationRequestIdByCFRequestId(
         bytes32 _requestId,
         uint256 _tokenizationRequestId
@@ -235,6 +240,13 @@ contract WorkVerifier is FunctionsClient, Ownable {
         s_tokenizationRequestIdByCFRequestId[
             _requestId
         ] = _tokenizationRequestId;
+    }
+
+    function _setRequestType(
+        uint256 _tokenizationRequestId,
+        WorkCFRequestType _requestType
+    ) internal {
+        s_tokenizationRequestType[_tokenizationRequestId] = _requestType;
     }
 
     function _setLastVerifiedData(
@@ -254,6 +266,18 @@ contract WorkVerifier is FunctionsClient, Ownable {
     // External / Public View
     ////////////////////
 
+    function getTokenizationRequestId(
+        bytes32 requestId
+    ) public view returns (uint256) {
+        return s_tokenizationRequestIdByCFRequestId[requestId];
+    }
+
+    function getRequestType(
+        uint256 tokenizationRequestId
+    ) public view returns (WorkCFRequestType) {
+        return s_tokenizationRequestType[tokenizationRequestId];
+    }
+
     function getLastVerifiedData(
         uint256 _tokenizationRequestId
     ) external view returns (IDWorkConfig.VerifiedWorkData memory) {
@@ -262,18 +286,6 @@ contract WorkVerifier is FunctionsClient, Ownable {
 
     function getLastRequestId() external view returns (bytes32) {
         return s_lastRequestId;
-    }
-
-    function getTokenizationRequestId(
-        bytes32 requestId
-    ) external view returns (uint256) {
-        return s_tokenizationRequestIdByCFRequestId[requestId];
-    }
-
-    function getRequestType(
-        uint256 tokenizationRequestId
-    ) external view returns (WorkCFRequestType) {
-        return s_tokenizationRequestType[tokenizationRequestId];
     }
 
     function getSecretsReference() external view returns (bytes memory) {

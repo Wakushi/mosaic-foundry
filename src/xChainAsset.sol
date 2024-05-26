@@ -32,9 +32,11 @@ contract xChainAsset is
 
     // Chainlink CCIP
     uint256 constant POLYGON_AMOY_CHAIN_ID = 80002;
+
     IRouterClient internal immutable i_ccipRouter;
-    uint64 private immutable i_currentChainSelector;
     LinkTokenInterface internal immutable i_linkToken;
+    uint64 private immutable i_currentChainSelector;
+
     mapping(uint64 destChainSelector => address xWorkAddress) s_chains;
 
     ///////////////////
@@ -42,14 +44,12 @@ contract xChainAsset is
     ///////////////////
 
     event CrossChainSent(
-        address from,
         address to,
         uint256 tokenId,
         uint64 sourceChainSelector,
         uint64 destinationChainSelector
     );
     event CrossChainReceived(
-        address from,
         address to,
         uint256 tokenId,
         uint64 sourceChainSelector,
@@ -118,26 +118,31 @@ contract xChainAsset is
     ////////////////////
 
     function xChainWorkTokenTransfer(
-        address _from,
         address _to,
         uint256 _tokenizationRequestId,
         uint64 _destinationChainSelector,
         PayFeesIn _payFeesIn,
         uint256 _gasLimit
     )
-        external
+        public
         nonReentrant
         onlyEnabledChain(_destinationChainSelector)
         returns (bytes32 messageId)
     {
-        TokenizedWork memory tokenizedWork = s_tokenizationRequests[
+        TokenizedWork storage tokenizedWork = s_tokenizationRequests[
             _tokenizationRequestId
         ];
+
+        if (msg.sender != tokenizedWork.owner) {
+            revert dWork__NotWorkOwner();
+        }
+
         _burn(tokenizedWork.workTokenId);
+
+        tokenizedWork.owner = _to;
 
         IDWorkConfig.xChainWorkTokenTransferData memory data = IDWorkConfig
             .xChainWorkTokenTransferData({
-                from: _from,
                 to: _to,
                 workTokenId: tokenizedWork.workTokenId,
                 ownerName: tokenizedWork.ownerName,
@@ -187,7 +192,6 @@ contract xChainAsset is
         }
 
         emit CrossChainSent(
-            _from,
             _to,
             tokenizedWork.workTokenId,
             i_currentChainSelector,
@@ -217,7 +221,6 @@ contract xChainAsset is
         _createTokenizedWork(data);
 
         emit CrossChainReceived(
-            data.from,
             data.to,
             data.workTokenId,
             sourceChainSelector,
@@ -225,11 +228,21 @@ contract xChainAsset is
         );
     }
 
+    ////////////////////
+    // Internal
+    ////////////////////
+
+    function _enableChain(
+        uint64 _chainSelector,
+        address _xWorkAddress
+    ) internal {
+        s_chains[_chainSelector] = _xWorkAddress;
+    }
+
     function _encodeArgs(
         IDWorkConfig.xChainWorkTokenTransferData memory _encodeTokenTransferData
     ) internal pure returns (bytes memory) {
         bytes memory encodedArgs = abi.encode(
-            _encodeTokenTransferData.from,
             _encodeTokenTransferData.to,
             _encodeTokenTransferData.workTokenId
         );
@@ -240,7 +253,6 @@ contract xChainAsset is
         bytes memory encodedPackage
     ) internal pure returns (IDWorkConfig.xChainWorkTokenTransferData memory) {
         (
-            address from,
             address to,
             uint256 workTokenId,
             string memory ownerName,
@@ -252,7 +264,6 @@ contract xChainAsset is
         ) = abi.decode(
                 encodedPackage,
                 (
-                    address,
                     address,
                     uint256,
                     string,
@@ -266,7 +277,6 @@ contract xChainAsset is
 
         return
             IDWorkConfig.xChainWorkTokenTransferData({
-                from: from,
                 to: to,
                 workTokenId: workTokenId,
                 ownerName: ownerName,

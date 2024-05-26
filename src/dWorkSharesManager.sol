@@ -93,6 +93,7 @@ contract dWorkSharesManager is ERC1155, Ownable {
     error dWorkSharesManager__SharesNotOwned();
     error dWorkSharesManager__TransferFailedOnRedeem();
     error dWorkSharesManager__RedeemableValueExceeded();
+    error dWorkSharesManager__SellValueError();
 
     //////////////////
     // Modifiers
@@ -128,14 +129,20 @@ contract dWorkSharesManager is ERC1155, Ownable {
     // External / Public
     ////////////////////
 
+    /**
+     *
+     * @param _workTokenId Token id of the tokenized work on dWork.sol
+     * @param _workOwner Owner of the work token
+     * @param _shareSupply Total supply of the created shares
+     * @param _sharePriceUsd Price of each share in USD
+     * @dev Creates shares for a work that was tokenized on dWork.sol
+     */
     function createShares(
         uint256 _workTokenId,
         address _workOwner,
         uint256 _shareSupply,
         uint256 _sharePriceUsd
-    ) external returns (uint256) {
-        _ensureOnlydWork();
-
+    ) external onlyDWork returns (uint256) {
         unchecked {
             ++s_shareTokenId;
         }
@@ -166,6 +173,11 @@ contract dWorkSharesManager is ERC1155, Ownable {
         return s_shareTokenId;
     }
 
+    /**
+     * @param _sharesTokenId The token id of the share related to the work token that was fractionalized on dWork.sol
+     * @param _shareAmount Amount of shares to buy
+     * @dev Allows users to buy shares of a work that was tokenized and fractionalized on dWork.sol
+     */
     function buyInitialShare(
         uint256 _sharesTokenId,
         uint256 _shareAmount
@@ -206,11 +218,21 @@ contract dWorkSharesManager is ERC1155, Ownable {
         emit ShareBought(_sharesTokenId, _shareAmount, msg.sender);
     }
 
+    /**
+     * @param _sharesTokenId The token id of the share related to the work token that was fractionalized on dWork.sol
+     * @param _amount Amount of shares to buy
+     * @param _priceUsd Price of the share in USD
+     * @dev Allows users to list shares of a work that was tokenized and fractionalized on dWork.sol
+     */
     function listMarketShareItem(
         uint256 _sharesTokenId,
         uint256 _amount,
         uint256 _priceUsd
-    ) external whenSharesNotPaused(_sharesTokenId) returns (uint256) {
+    )
+        external
+        whenSharesNotPaused(_sharesTokenId)
+        returns (uint256 marketShareItemId)
+    {
         if (_sharesTokenId == 0) {
             revert dWorkSharesManager__TokenIdDoesNotExist();
         }
@@ -253,6 +275,10 @@ contract dWorkSharesManager is ERC1155, Ownable {
         return s_marketShareItemId;
     }
 
+    /**
+     * @param _marketShareItemId The id of the market share item to buy
+     * @dev Allows users to buy a listed share item
+     */
     function buyMarketShareItem(uint256 _marketShareItemId) external payable {
         if (!s_isItemListed[_marketShareItemId]) {
             revert dWorkSharesManager__ItemNotListed();
@@ -293,6 +319,10 @@ contract dWorkSharesManager is ERC1155, Ownable {
         );
     }
 
+    /**
+     * @param _marketShareItemId The id of the market share item to unlist
+     * @dev Allows users to unlist a listed share item
+     */
     function unlistMarketShareItem(uint256 _marketShareItemId) external {
         if (!s_isItemListed[_marketShareItemId]) {
             revert dWorkSharesManager__ItemNotListed();
@@ -320,13 +350,28 @@ contract dWorkSharesManager is ERC1155, Ownable {
      */
     function onWorkSold(uint256 _sharesTokenId) external payable onlyDWork {
         WorkShares storage workShares = s_workShares[_sharesTokenId];
+
+        if (
+            msg.value == 0 ||
+            workShares.maxShareSupply == 0 ||
+            msg.value < workShares.maxShareSupply
+        ) {
+            revert dWorkSharesManager__SellValueError();
+        }
+
         workShares.isRedeemable = true;
         workShares.redeemableValuePerShare =
             msg.value /
             workShares.maxShareSupply;
+
         s_totalRedeemableValuePerWork[_sharesTokenId] = msg.value;
     }
 
+    /**
+     * @param _shareTokenId The token id of the share related to the work token that was sold on dWork.sol
+     * @param _shareAmount Amount of shares to redeem
+     * @dev Allows users to burn and redeem their shares for the value they are worth
+     */
     function redeemAndBurnShares(
         uint256 _shareTokenId,
         uint256 _shareAmount
@@ -353,24 +398,6 @@ contract dWorkSharesManager is ERC1155, Ownable {
         }
     }
 
-    function setDWorkAddress(address _dWork) external onlyOwner {
-        s_dWork = _dWork;
-    }
-
-    function pauseShares(uint256 _workTokenId) external onlyDWork {
-        uint256 sharesTokenId = s_sharesTokenIdByWorkId[_workTokenId];
-        WorkShares storage workShares = s_workShares[sharesTokenId];
-        workShares.isPaused = true;
-        emit SharesPaused(workShares, true);
-    }
-
-    function unpauseShares(uint256 _workTokenId) external onlyDWork {
-        uint256 sharesTokenId = s_sharesTokenIdByWorkId[_workTokenId];
-        WorkShares storage workShares = s_workShares[sharesTokenId];
-        workShares.isPaused = false;
-        emit SharesPaused(workShares, false);
-    }
-
     function safeTransferFrom(
         address from,
         address to,
@@ -389,6 +416,32 @@ contract dWorkSharesManager is ERC1155, Ownable {
         bytes memory data
     ) public override whenSharesBatchNotPaused(ids) {
         super.safeBatchTransferFrom(from, to, ids, values, data);
+    }
+
+    /**
+     * @param _workTokenId The token id of the work that was fractionalized on dWork.sol
+     * @dev Pauses the shares of a work that was fractionalized on dWork.sol (triggered by dWork.sol when discrepancies are found during the work verification process)
+     */
+    function pauseShares(uint256 _workTokenId) external onlyDWork {
+        uint256 sharesTokenId = s_sharesTokenIdByWorkId[_workTokenId];
+        WorkShares storage workShares = s_workShares[sharesTokenId];
+        workShares.isPaused = true;
+        emit SharesPaused(workShares, true);
+    }
+
+    /**
+     * @param _workTokenId The token id of the work that was fractionalized on dWork.sol
+     * @dev Unpauses the shares of a work that was fractionalized on dWork.sol
+     */
+    function unpauseShares(uint256 _workTokenId) external onlyDWork {
+        uint256 sharesTokenId = s_sharesTokenIdByWorkId[_workTokenId];
+        WorkShares storage workShares = s_workShares[sharesTokenId];
+        workShares.isPaused = false;
+        emit SharesPaused(workShares, false);
+    }
+
+    function setDWorkAddress(address _dWork) external onlyOwner {
+        s_dWork = _dWork;
     }
 
     ////////////////////

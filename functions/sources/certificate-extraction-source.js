@@ -58,19 +58,13 @@ try {
   const { artist, title } = analyzedData
 
   if (!artist || !title) {
-    const encoded = abiCoder.encode(
-      ["string", "string"],
-      ["error", "Error extracting certificate information"]
-    )
+    const encoded = abiCoder.encode(["string", "string"], ["", ""])
     return ethers.getBytes(encoded)
   } else {
     const encoded = abiCoder.encode(["string", "string"], [artist, title])
     return ethers.getBytes(encoded)
   }
 } catch (error) {
-  const encoded = abiCoder.encode(
-    ["string", "string"],
-    ["error", JSON.stringify(error)]
-  )
+  const encoded = abiCoder.encode(["string", "string"], ["", ""])
   return ethers.getBytes(encoded)
 }

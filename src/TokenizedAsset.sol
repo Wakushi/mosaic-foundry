@@ -125,15 +125,15 @@ contract TokenizedAsset is ERC721, ERC721URIStorage, ERC721Burnable {
     // Internal
     ////////////////////
 
-    function _createTokenizationRequest(
+    function _registerTokenizationRequest(
         string memory _customerSubmissionIPFSHash,
         string memory _appraiserReportIPFSHash,
         string memory _certificateIPFSHash,
         address _customer,
         uint256 _tokenizationRequestId
-    ) internal returns (uint256 tokenizationRequestId) {
+    ) internal {
         s_tokenizationRequests[_tokenizationRequestId] = TokenizedWork({
-            customerSubmissionIPFSHash: _customerSubmissionIPFSHash, // SUS
+            customerSubmissionIPFSHash: _customerSubmissionIPFSHash,
             appraiserReportIPFSHash: _appraiserReportIPFSHash,
             certificateIPFSHash: _certificateIPFSHash,
             owner: _customer,
@@ -150,13 +150,12 @@ contract TokenizedAsset is ERC721, ERC721URIStorage, ERC721Burnable {
             verificationStep: VerificationStep.PendingCertificateAnalysis,
             certificate: WorkCertificate({artist: "", work: ""})
         });
-        return _tokenizationRequestId;
     }
 
     function _createTokenizedWork(
         IDWorkConfig.xChainWorkTokenTransferData memory data
     ) internal {
-        _createTokenizationRequest(
+        _registerTokenizationRequest(
             "",
             "",
             "",
@@ -284,11 +283,8 @@ contract TokenizedAsset is ERC721, ERC721URIStorage, ERC721Burnable {
         }
     }
 
-    function _ensureWorkOwnership(
-        address _owner,
-        uint256 _tokenId
-    ) internal view {
-        if (ownerOf(_tokenId) != _owner) {
+    function _ensureWorkOwner(address _owner) internal view {
+        if (msg.sender != _owner) {
             revert dWork__NotWorkOwner();
         }
     }
