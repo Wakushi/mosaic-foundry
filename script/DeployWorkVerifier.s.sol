@@ -14,7 +14,7 @@ contract DeployWorkVerifier is Script {
         "./functions/sources/certificate-extraction-source.js";
     bytes constant DON_SECRETS_REFERENCE =
         hex"a266736c6f744964006776657273696f6e1a664da557";
-        
+
     function run() external {
         IGetWorkVerifierReturnTypes.GetWorkVerifierReturnType
             memory workVerifierReturnType = getWorkVerifierRequirements();

@@ -17,7 +17,9 @@ contract dWorkSharesManager is ERC1155, Ownable {
         uint256 totalShareBought;
         uint256 totalSellValueUsd;
         address workOwner;
+        uint256 redeemableValuePerShare;
         bool isPaused;
+        bool isRedeemable;
     }
 
     struct MarketShareItem {
@@ -38,12 +40,14 @@ contract dWorkSharesManager is ERC1155, Ownable {
     uint256 s_shareTokenId;
     uint256 s_marketShareItemId;
     uint256[] s_listedShareItemsIds;
+
     mapping(uint256 sharesTokenId => WorkShares workShares) s_workShares;
     mapping(uint256 workTokenId => uint256 sharesTokenId) s_sharesTokenIdByWorkId;
     mapping(uint256 marketShareItemId => MarketShareItem marketShareItem) s_marketShareItems;
     mapping(uint256 marketShareItemId => bool isListed) s_isItemListed;
     mapping(uint256 listedShareItem => uint256 index)
         public s_listedShareItemIndex;
+    mapping(uint256 shareTokenId => uint256 totalRedeemableValue) s_totalRedeemableValuePerWork;
 
     ///////////////////
     // Events
@@ -85,6 +89,10 @@ contract dWorkSharesManager is ERC1155, Ownable {
     error dWorkSharesManager__ItemNotListed();
     error dWorkSharesManager__NotItemSeller();
     error dWorkSharesManager__ItemAlreadySold();
+    error dWorkSharesManager__ShareNotRedeemable();
+    error dWorkSharesManager__SharesNotOwned();
+    error dWorkSharesManager__TransferFailedOnRedeem();
+    error dWorkSharesManager__RedeemableValueExceeded();
 
     //////////////////
     // Modifiers
@@ -141,7 +149,9 @@ contract dWorkSharesManager is ERC1155, Ownable {
             totalShareBought: 0,
             totalSellValueUsd: 0,
             workOwner: _workOwner,
-            isPaused: false
+            isPaused: false,
+            isRedeemable: false,
+            redeemableValuePerShare: 0
         });
 
         s_sharesTokenIdByWorkId[_workTokenId] = s_shareTokenId;
@@ -303,6 +313,46 @@ contract dWorkSharesManager is ERC1155, Ownable {
         emit MarketShareItemUnlisted(_marketShareItemId);
     }
 
+    /**
+     * @param _sharesTokenId The token id of the share related to the work token that was sold on dWork.sol
+     * @dev Called by dWork contract when a work is sold. Its job is to set the work shares as redeemable
+     * and set the redeemable value per share so they can be redeemed and burn by the share holders.
+     */
+    function onWorkSold(uint256 _sharesTokenId) external payable onlyDWork {
+        WorkShares storage workShares = s_workShares[_sharesTokenId];
+        workShares.isRedeemable = true;
+        workShares.redeemableValuePerShare =
+            msg.value /
+            workShares.maxShareSupply;
+        s_totalRedeemableValuePerWork[_sharesTokenId] = msg.value;
+    }
+
+    function redeemAndBurnShares(
+        uint256 _shareTokenId,
+        uint256 _shareAmount
+    ) external {
+        if (balanceOf(msg.sender, _shareTokenId) < _shareAmount) {
+            revert dWorkSharesManager__SharesNotOwned();
+        }
+
+        WorkShares memory workShare = getWorkSharesByTokenId(_shareTokenId);
+
+        if (!workShare.isRedeemable) {
+            revert dWorkSharesManager__ShareNotRedeemable();
+        }
+
+        uint256 redeemableValue = workShare.redeemableValuePerShare *
+            _shareAmount;
+        _ensureEnoughValueToRedeem(_shareTokenId, redeemableValue);
+        s_totalRedeemableValuePerWork[_shareTokenId] -= redeemableValue;
+        _burn(msg.sender, _shareTokenId, _shareAmount);
+
+        (bool success, ) = payable(msg.sender).call{value: redeemableValue}("");
+        if (!success) {
+            revert dWorkSharesManager__TransferFailedOnRedeem();
+        }
+    }
+
     function setDWorkAddress(address _dWork) external onlyOwner {
         s_dWork = _dWork;
     }
@@ -382,6 +432,18 @@ contract dWorkSharesManager is ERC1155, Ownable {
         delete s_listedShareItemIndex[_marketShareItemId];
     }
 
+    function _ensureEnoughValueToRedeem(
+        uint256 _shareTokenId,
+        uint256 _redeemableValue
+    ) internal view {
+        uint256 totalRedeemableValue = s_totalRedeemableValuePerWork[
+            _shareTokenId
+        ];
+        if (totalRedeemableValue < _redeemableValue) {
+            revert dWorkSharesManager__RedeemableValueExceeded();
+        }
+    }
+
     ////////////////////
     // External / Public View
     ////////////////////
@@ -396,13 +458,13 @@ contract dWorkSharesManager is ERC1155, Ownable {
 
     function getSharesTokenIdByWorkId(
         uint256 _workTokenId
-    ) external view returns (uint256) {
+    ) public view returns (uint256 sharesTokenId) {
         return s_sharesTokenIdByWorkId[_workTokenId];
     }
 
     function getWorkSharesByTokenId(
         uint256 _sharesTokenId
-    ) external view returns (WorkShares memory) {
+    ) public view returns (WorkShares memory) {
         return s_workShares[_sharesTokenId];
     }
 

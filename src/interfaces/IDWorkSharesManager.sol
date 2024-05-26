@@ -9,6 +9,8 @@ interface IDWorkSharesManager {
         uint256 _sharePriceUsd
     ) external returns (uint256);
 
+    function onWorkSold(uint256 _sharesTokenId) external payable;
+
     function pauseShares(uint256 _tokenizationRequestId) external;
 
     function unpauseShares(uint256 _tokenizationRequestId) external;

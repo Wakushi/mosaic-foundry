@@ -37,7 +37,6 @@ contract dWork is
         CertificateAnalysisDone,
         PendingWorkVerification,
         WorkVerificationDone,
-        PendingTokenization,
         Tokenized
     }
 
@@ -85,6 +84,8 @@ contract dWork is
     mapping(uint256 workTokenId => TokenizedWork tokenizedWork) s_tokenizedWorkByTokenId;
 
     uint256 constant MIN_VERIFICATION_INTERVAL = 30 days;
+    uint256 constant PROTOCOL_FEE_PERCENTAGE = 30; // 3%
+    uint256 s_protocolFees;
     address s_workSharesManager;
     address s_workVerifier;
 
@@ -175,7 +176,7 @@ contract dWork is
         address _workSharesManager,
         address _workVerifier,
         address _priceFeed
-    ) Ownable(msg.sender) ERC721("xArtwork", "xART") {
+    ) Ownable(msg.sender) ERC721("xWork", "xWORK") {
         s_workSharesManager = _workSharesManager;
         s_workVerifier = _workVerifier;
         s_priceFeed = AggregatorV3Interface(_priceFeed);
@@ -285,6 +286,8 @@ contract dWork is
             revert dWork__AlreadyFractionalized();
         }
 
+        tokenizedWork.isFractionalized = true;
+
         address workOwner = ownerOf(tokenizedWork.workTokenId);
 
         uint256 sharesTokenId = IDWorkSharesManager(s_workSharesManager)
@@ -365,7 +368,7 @@ contract dWork is
             s_tokenizationRequests[tokenizationRequestId].verificationStep ==
             VerificationStep.PendingCertificateAnalysis
         ) {
-            _fullfillCertificateExtractionRequest(
+            _fulfillCertificateExtractionRequest(
                 tokenizationRequestId,
                 lastVerifiedData.artist,
                 lastVerifiedData.work
@@ -405,6 +408,13 @@ contract dWork is
         _update(msg.sender, _workTokenId, msg.sender);
     }
 
+    /**
+     *
+     * @param _workTokenId The ID of the work token to be bought.
+     * @notice Buy a work token that is listed for sale.
+     * Once bought, we update the tokenized work data, transfer the work token to the buyer and call
+     * the WorkSharesManager contract to enable the share holders to claim their share of the sale.
+     */
     function buyWorkToken(uint256 _workTokenId) external payable {
         TokenizedWork storage tokenizedWork = s_tokenizedWorkByTokenId[
             _workTokenId
@@ -415,37 +425,17 @@ contract dWork is
         if (sentValueUsd < tokenizedWork.listingPriceUsd) {
             revert dWork__NotEnoughValueSent();
         }
+
+        _updateTokenizedWorkOnSale(tokenizedWork, sentValueUsd);
         _update(msg.sender, _workTokenId, address(this));
 
-        // Distribute the buying value equally between all the share holders.
-        // Switch the status of the corresponding share token to redeemable.
-    }
+        uint256 protocolFees = (msg.value * PROTOCOL_FEE_PERCENTAGE) / 1000;
+        s_protocolFees += protocolFees;
+        uint256 sellValue = msg.value - protocolFees;
 
-    function _updateTokenizedWorkOnSale(
-        TokenizedWork memory tokenizedWork,
-        uint256 _soldValueUsd
-    ) internal {
-        TokenizedWork memory updatedWork = TokenizedWork({
-            customerSubmissionIPFSHash: tokenizedWork
-                .customerSubmissionIPFSHash,
-            appraiserReportIPFSHash: tokenizedWork.appraiserReportIPFSHash,
-            certificateIPFSHash: tokenizedWork.certificateIPFSHash,
-            owner: msg.sender,
-            initialOwnerName: tokenizedWork.initialOwnerName,
-            lastWorkPriceUsd: _soldValueUsd,
-            workTokenId: tokenizedWork.workTokenId,
-            sharesTokenId: 0,
-            listingPriceUsd: 0,
-            isMinted: true,
-            isFractionalized: false,
-            isPaused: false,
-            isListed: false,
-            lastVerifiedAt: block.timestamp,
-            verificationStep: VerificationStep.Tokenized,
-            certificate: tokenizedWork.certificate
-        });
-
-        s_tokenizedWorkByTokenId[tokenizedWork.workTokenId] = updatedWork;
+        IDWorkSharesManager(s_workSharesManager).onWorkSold{value: sellValue}(
+            tokenizedWork.sharesTokenId
+        );
     }
 
     function approve(
@@ -527,7 +517,7 @@ contract dWork is
         );
     }
 
-    function _fullfillCertificateExtractionRequest(
+    function _fulfillCertificateExtractionRequest(
         uint256 _tokenizationRequestId,
         string memory _artist,
         string memory _work
@@ -655,6 +645,33 @@ contract dWork is
             s_tokenizationRequests[_tokenizationRequestId].owner,
             s_tokenId
         );
+    }
+
+    function _updateTokenizedWorkOnSale(
+        TokenizedWork memory tokenizedWork,
+        uint256 _soldValueUsd
+    ) internal {
+        TokenizedWork memory updatedWork = TokenizedWork({
+            customerSubmissionIPFSHash: tokenizedWork
+                .customerSubmissionIPFSHash,
+            appraiserReportIPFSHash: tokenizedWork.appraiserReportIPFSHash,
+            certificateIPFSHash: tokenizedWork.certificateIPFSHash,
+            owner: msg.sender,
+            initialOwnerName: tokenizedWork.initialOwnerName,
+            lastWorkPriceUsd: _soldValueUsd,
+            workTokenId: tokenizedWork.workTokenId,
+            sharesTokenId: 0,
+            listingPriceUsd: 0,
+            isMinted: true,
+            isFractionalized: false,
+            isPaused: false,
+            isListed: false,
+            lastVerifiedAt: block.timestamp,
+            verificationStep: VerificationStep.Tokenized,
+            certificate: tokenizedWork.certificate
+        });
+
+        s_tokenizedWorkByTokenId[tokenizedWork.workTokenId] = updatedWork;
     }
 
     function _ensureNotZeroAddress(address _address) internal pure {
