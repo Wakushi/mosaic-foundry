@@ -15,6 +15,7 @@ contract HelperConfig is Script {
         address ccipRouterAddress;
         address linkTokenAddress;
         uint64 chainSelector;
+        address usdcAddress;
     }
 
     uint256 public constant DEFAULT_ANVIL_KEY =
@@ -42,7 +43,8 @@ contract HelperConfig is Script {
                 functionsSubId: 212,
                 ccipRouterAddress: 0x9C32fCB86BF0f4a1A8921a9Fe46de3198bb884B2,
                 linkTokenAddress: 0x0Fd9e8d3aF1aaee056EB9e802c3A762a667b1904,
-                chainSelector: 16281711391670634445
+                chainSelector: 16281711391670634445,
+                usdcAddress: 0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582
             });
     }
 
@@ -59,7 +61,8 @@ contract HelperConfig is Script {
                 functionsSubId: 192,
                 ccipRouterAddress: 0x114A20A10b43D4115e5aeef7345a1A71d2a60C57,
                 linkTokenAddress: 0xE4aB69C077896252FAFBD49EFD26B5D171A32410,
-                chainSelector: 5224473277236331295
+                chainSelector: 5224473277236331295,
+                usdcAddress: 0x5fd84259d66Cd46123540766Be93DFE6D43130D7
             });
     }
 
@@ -91,7 +94,8 @@ contract HelperConfig is Script {
                 functionsSubId: 0,
                 ccipRouterAddress: 0x9C32fCB86BF0f4a1A8921a9Fe46de3198bb884B2,
                 linkTokenAddress: address(link),
-                chainSelector: 0
+                chainSelector: 0,
+                usdcAddress: 0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582
             });
     }
 }

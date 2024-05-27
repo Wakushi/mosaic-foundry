@@ -218,8 +218,7 @@ contract TokenizedAsset is ERC721, ERC721URIStorage, ERC721Burnable {
     }
 
     function _updateTokenizedWorkOnSale(
-        TokenizedWork memory tokenizedWork,
-        uint256 _soldValueUsd
+        TokenizedWork memory tokenizedWork
     ) internal {
         TokenizedWork memory updatedWork = TokenizedWork({
             customerSubmissionIPFSHash: tokenizedWork
@@ -228,7 +227,7 @@ contract TokenizedAsset is ERC721, ERC721URIStorage, ERC721Burnable {
             certificateIPFSHash: tokenizedWork.certificateIPFSHash,
             owner: msg.sender,
             ownerName: tokenizedWork.ownerName,
-            lastWorkPriceUsd: _soldValueUsd,
+            lastWorkPriceUsd: tokenizedWork.listingPriceUsd,
             workTokenId: tokenizedWork.workTokenId,
             sharesTokenId: 0,
             listingPriceUsd: 0,

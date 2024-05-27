@@ -8,6 +8,8 @@ import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/
 import {IAny2EVMMessageReceiver} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IAny2EVMMessageReceiver.sol";
 import {LinkTokenInterface} from "@chainlink/contracts/src/v0.8/shared/interfaces/LinkTokenInterface.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+// OpenZeppelin
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 // Custom
 import {TokenizedAsset} from "./TokenizedAsset.sol";
 import {IDWorkConfig} from "./interfaces/IDWorkConfig.sol";
@@ -32,12 +34,18 @@ contract xChainAsset is
 
     // Chainlink CCIP
     uint256 constant POLYGON_AMOY_CHAIN_ID = 80002;
+    uint64 constant POLYGON_AMOY_CHAIN_SELECTOR = 16281711391670634445;
+    uint256 constant OPTIMISM_SEPOLIA_CHAIN_ID = 11155420;
+    uint64 constant OPTIMISM_SEPOLIA_CHAIN_SELECTOR = 5224473277236331295;
 
     IRouterClient internal immutable i_ccipRouter;
     LinkTokenInterface internal immutable i_linkToken;
     uint64 private immutable i_currentChainSelector;
+    address immutable i_usdc;
 
     mapping(uint64 destChainSelector => address xWorkAddress) s_chains;
+    mapping(uint256 chainId => uint64 chainSelector) s_chainSelectors;
+    mapping(uint64 destChainSelector => address xWorkSharesManagerAddress) s_sharesManagers;
 
     ///////////////////
     // Events
@@ -105,12 +113,18 @@ contract xChainAsset is
     constructor(
         address _ccipRouterAddress,
         address _linkTokenAddress,
-        uint64 _currentChainSelector
+        uint64 _currentChainSelector,
+        address _usdc
     ) {
         if (_ccipRouterAddress == address(0)) revert dWork__InvalidRouter();
         i_ccipRouter = IRouterClient(_ccipRouterAddress);
         i_linkToken = LinkTokenInterface(_linkTokenAddress);
         i_currentChainSelector = _currentChainSelector;
+        i_usdc = _usdc;
+        s_chainSelectors[POLYGON_AMOY_CHAIN_ID] = POLYGON_AMOY_CHAIN_SELECTOR;
+        s_chainSelectors[
+            OPTIMISM_SEPOLIA_CHAIN_ID
+        ] = OPTIMISM_SEPOLIA_CHAIN_SELECTOR;
     }
 
     ////////////////////
@@ -199,6 +213,47 @@ contract xChainAsset is
         );
     }
 
+    function _xChainOnWorkSold(
+        uint256 _sharesTokenId,
+        uint256 _sellValue,
+        uint256 _mintedChainId
+    ) internal returns (bytes32 messageId) {
+        uint64 destinationChainSelector = s_chainSelectors[_mintedChainId];
+
+        Client.EVMTokenAmount[]
+            memory tokenAmounts = new Client.EVMTokenAmount[](1);
+        Client.EVMTokenAmount memory tokenAmount = Client.EVMTokenAmount({
+            token: i_usdc,
+            amount: _sellValue
+        });
+        tokenAmounts[0] = tokenAmount;
+
+        Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
+            receiver: abi.encode(s_sharesManagers[destinationChainSelector]),
+            data: abi.encode(_sharesTokenId, _sellValue),
+            tokenAmounts: tokenAmounts,
+            extraArgs: Client._argsToBytes(
+                Client.EVMExtraArgsV1({gasLimit: 300000})
+            ),
+            feeToken: address(i_linkToken)
+        });
+
+        uint256 fees = i_ccipRouter.getFee(destinationChainSelector, message);
+
+        if (fees > i_linkToken.balanceOf(address(this))) {
+            revert dWork__NotEnoughBalanceForFees();
+        }
+
+        i_linkToken.approve(address(i_ccipRouter), fees);
+
+        IERC20(i_usdc).approve(address(i_ccipRouter), _sellValue);
+
+        messageId = i_ccipRouter.ccipSend{value: fees}(
+            destinationChainSelector,
+            message
+        );
+    }
+
     function ccipReceive(
         Client.Any2EVMMessage calldata message
     )
@@ -237,6 +292,13 @@ contract xChainAsset is
         address _xWorkAddress
     ) internal {
         s_chains[_chainSelector] = _xWorkAddress;
+    }
+
+    function _setChainSharesManager(
+        uint64 _chainSelector,
+        address _sharesManagerAddress
+    ) internal {
+        s_sharesManagers[_chainSelector] = _sharesManagerAddress;
     }
 
     function _encodeArgs(

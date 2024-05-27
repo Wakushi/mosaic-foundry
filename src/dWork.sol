@@ -9,6 +9,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Base64} from "@openzeppelin/contracts/utils/Base64.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 // Custom
 import {AggregatorV3Interface} from "./libraries/OracleLib.sol";
 import {PriceConverter} from "./libraries/PriceConverter.sol";
@@ -16,6 +17,7 @@ import {IDWorkSharesManager} from "./interfaces/IDWorkSharesManager.sol";
 import {IWorkVerifier} from "./interfaces/IWorkVerifier.sol";
 import {IDWorkConfig} from "./interfaces/IDWorkConfig.sol";
 import {xChainAsset} from "./xChainAsset.sol";
+import {OracleLib} from "./libraries/OracleLib.sol";
 
 contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
     ///////////////////
@@ -23,13 +25,16 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
     ///////////////////
 
     using PriceConverter for uint256;
+    using OracleLib for AggregatorV3Interface;
 
     ///////////////////
     // State variables
     ///////////////////
 
     // Chainlink Price Feed
-    AggregatorV3Interface s_priceFeed;
+    AggregatorV3Interface immutable i_usdcUsdFeed;
+    uint256 public constant ADDITIONAL_FEED_PRECISION = 1e10;
+    uint256 private constant PRECISION = 1e18;
 
     address s_workSharesManager;
     address s_workVerifier;
@@ -82,6 +87,7 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
     error dWork__AlreadyFractionalized();
     error dWork__NotEnoughValueSent();
     error dWork__InvalidIPFSHash();
+    error dWork__TransferFailed();
 
     //////////////////
     // Modifiers
@@ -111,18 +117,20 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         address _priceFeed,
         address _ccipRouterAddress,
         address _linkTokenAddress,
-        uint64 _currentChainSelector
+        uint64 _currentChainSelector,
+        address _usdcAddress
     )
         Ownable(msg.sender)
         xChainAsset(
             _ccipRouterAddress,
             _linkTokenAddress,
-            _currentChainSelector
+            _currentChainSelector,
+            _usdcAddress
         )
     {
         s_workSharesManager = _workSharesManager;
         s_workVerifier = _workVerifier;
-        s_priceFeed = AggregatorV3Interface(_priceFeed);
+        i_usdcUsdFeed = AggregatorV3Interface(_priceFeed);
     }
 
     ////////////////////
@@ -353,27 +361,80 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
      * Once bought, we update the tokenized work data, transfer the work token to the buyer and call
      * the WorkSharesManager contract to enable the share holders to claim their share of the sale.
      */
-    function buyWorkToken(uint256 _workTokenId) external payable {
+    function buyWorkToken(uint256 _workTokenId) external {
         TokenizedWork storage tokenizedWork = s_tokenizedWorkByTokenId[
             _workTokenId
         ];
 
-        uint256 sentValueUsd = msg.value.getConversionRate(s_priceFeed);
+        uint256 sentValueUSDC = getUsdcValueOfUsd(
+            tokenizedWork.listingPriceUsd
+        );
 
-        if (sentValueUsd < tokenizedWork.listingPriceUsd) {
-            revert dWork__NotEnoughValueSent();
+        // Buyer has to approve the listing price in USDC to the dWork contract
+        bool buyerTransferSuccess = IERC20(i_usdc).transferFrom(
+            msg.sender,
+            address(this),
+            sentValueUSDC
+        );
+
+        if (!buyerTransferSuccess) {
+            revert dWork__TransferFailed();
         }
 
-        _updateTokenizedWorkOnSale(tokenizedWork, sentValueUsd);
+        address previousOwner = tokenizedWork.owner;
+        // Update the tokenized work data
+        _updateTokenizedWorkOnSale(tokenizedWork);
+
+        // Transfer the work token to the buyer
         _update(msg.sender, _workTokenId, address(this));
 
-        uint256 protocolFees = (msg.value * PROTOCOL_FEE_PERCENTAGE) / 1000;
+        uint256 protocolFees = (sentValueUSDC * PROTOCOL_FEE_PERCENTAGE) / 1000;
         s_protocolFees += protocolFees;
-        uint256 sellValue = msg.value - protocolFees;
+        uint256 sellValueUSDC = sentValueUSDC - protocolFees;
 
-        IDWorkSharesManager(s_workSharesManager).onWorkSold{value: sellValue}(
-            tokenizedWork.sharesTokenId
-        );
+        // If the work is fractionalized, we call the WorkSharesManager contract to enable the share holders to claim their share of the sale.
+        if (tokenizedWork.isFractionalized) {
+            IDWorkSharesManager.WorkShares
+                memory workShare = IDWorkSharesManager(s_workSharesManager)
+                    .getWorkShareByWorkTokenId(tokenizedWork.workTokenId);
+
+            // If the shares were minted on a different chain than the associated work is on, we send a CCIP message
+            // to the chain where the shares were minted along with the sale value in USDC.
+            if (workShare.mintedChain != block.chainid) {
+                _xChainOnWorkSold(
+                    tokenizedWork.sharesTokenId,
+                    sellValueUSDC,
+                    workShare.mintedChain
+                );
+            } else {
+                // If the shares were minted on the same chain as the associated work is on, we transfer the USDC value to the WorkSharesManager contract.
+                bool sharesManagerSendingSuccess = IERC20(i_usdc).transferFrom(
+                    address(this),
+                    s_workSharesManager,
+                    sellValueUSDC
+                );
+
+                if (!sharesManagerSendingSuccess) {
+                    revert dWork__TransferFailed();
+                }
+
+                IDWorkSharesManager(s_workSharesManager).onWorkSold(
+                    tokenizedWork.sharesTokenId,
+                    sellValueUSDC
+                );
+            }
+        } else {
+            // If the work is not fractionalized, we transfer the USDC value to the previous work owner.
+            bool previousOwnerTransferSuccess = IERC20(i_usdc).transferFrom(
+                address(this),
+                previousOwner,
+                sellValueUSDC
+            );
+
+            if (!previousOwnerTransferSuccess) {
+                revert dWork__TransferFailed();
+            }
+        }
     }
 
     /**
@@ -420,6 +481,13 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         address xWorkAddress
     ) external onlyOwner {
         _enableChain(_chainSelector, xWorkAddress);
+    }
+
+    function setChainSharesManager(
+        uint64 _chainSelector,
+        address _sharesManagerAddress
+    ) external onlyOwner {
+        _setChainSharesManager(_chainSelector, _sharesManagerAddress);
     }
 
     function pauseWorkToken(uint256 _tokenizationRequestId) external onlyOwner {
@@ -603,6 +671,17 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         uint256 _tokenizationRequestId
     ) public view returns (bool) {
         return s_tokenizationRequests[_tokenizationRequestId].isPaused;
+    }
+
+    function getUsdcPrice() public view returns (uint256) {
+        (, int256 price, , , ) = i_usdcUsdFeed.staleCheckLatestRoundData();
+        return uint256(price) * ADDITIONAL_FEED_PRECISION;
+    }
+
+    function getUsdcValueOfUsd(
+        uint256 usdAmount
+    ) public view returns (uint256) {
+        return (usdAmount * getUsdcPrice()) / PRECISION;
     }
 
     function bytes32ToUint256(bytes32 _uint) public pure returns (uint256) {

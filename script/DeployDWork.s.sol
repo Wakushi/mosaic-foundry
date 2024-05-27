@@ -18,7 +18,8 @@ contract DeployDWork is Script {
             ,
             address ccipRouterAddress,
             address linkTokenAddress,
-            uint64 chainSelector
+            uint64 chainSelector,
+            address usdcAddress
         ) = helperConfig.activeNetworkConfig();
 
         vm.startBroadcast();
@@ -28,7 +29,8 @@ contract DeployDWork is Script {
             priceFeed,
             ccipRouterAddress,
             linkTokenAddress,
-            chainSelector
+            chainSelector,
+            usdcAddress
         );
         vm.stopBroadcast();
         return newDWork;

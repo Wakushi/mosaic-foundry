@@ -11,12 +11,25 @@ contract DeployDWorkSharesManager is Script {
 
     function run() external returns (dWorkSharesManager) {
         HelperConfig helperConfig = new HelperConfig();
-        (, , address priceFeed, , , , ) = helperConfig.activeNetworkConfig();
+        (
+            ,
+            ,
+            address priceFeed,
+            ,
+            address ccipRouterAddress,
+            address linkTokenAddress,
+            uint64 chainSelector,
+            address usdcAddress
+        ) = helperConfig.activeNetworkConfig();
 
         vm.startBroadcast();
         dWorkSharesManager newDWorkShare = new dWorkSharesManager(
             BASE_URI,
-            priceFeed
+            priceFeed,
+            ccipRouterAddress,
+            linkTokenAddress,
+            chainSelector,
+            usdcAddress
         );
         vm.stopBroadcast();
 

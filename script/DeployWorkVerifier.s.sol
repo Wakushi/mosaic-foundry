@@ -48,6 +48,7 @@ contract DeployWorkVerifier is Script {
             uint64 functionsSubId,
             ,
             ,
+            ,
 
         ) = helperConfig.activeNetworkConfig();
 
