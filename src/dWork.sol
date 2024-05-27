@@ -68,25 +68,18 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         uint256 shareSupply
     );
 
-    event CertificateExtractionError(
-        uint256 indexed tokenizationRequestId,
-        string indexed errorTitle,
-        string indexed errorMessage
-    );
+    event CertificateExtractionError(uint256 indexed tokenizationRequestId);
 
-    event WorkVerificationError(
-        uint256 tokenizationRequestId,
-        string indexed errorMessage
-    );
+    event WorkVerificationError(uint256 tokenizationRequestId);
 
     //////////////////
     // Errors
     //////////////////
 
-    error dWork__WorkNotMinted();
-    error dWork__AlreadyFractionalized();
-    error dWork__NotEnoughValueSent();
+    error dWork__TokenizationNotCompleted();
     error dWork__InvalidIPFSHash();
+    error dWork__NotEnoughValueSent();
+    error dWork__AlreadyFractionalized();
     error dWork__TransferFailed();
 
     //////////////////
@@ -114,7 +107,7 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
     constructor(
         address _workSharesManager,
         address _workVerifier,
-        address _priceFeed,
+        address _uscdUsdpriceFeed,
         address _ccipRouterAddress,
         address _linkTokenAddress,
         uint64 _currentChainSelector,
@@ -130,7 +123,7 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
     {
         s_workSharesManager = _workSharesManager;
         s_workVerifier = _workVerifier;
-        i_usdcUsdFeed = AggregatorV3Interface(_priceFeed);
+        i_usdcUsdFeed = AggregatorV3Interface(_uscdUsdpriceFeed);
     }
 
     ////////////////////
@@ -143,10 +136,10 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
      * @param _certificateIPFSHash The IPFS hash of the certificate image.
      * @param _customer The address of the customer who submitted the work.
      *
-     * @notice Open a new tokenization request for a work of art. It registers the initial data and tasks the WorkVerifier contract to extract the certificate of authenticity.
+     * @notice Open a new tokenization request for an art piece. It registers the initial data and tasks the WorkVerifier contract to extract the certificate of authenticity.
      * This method will be called by the Mosaic Admins after the art appraisers have submitted their reports along with a scanned copy of the certificate of authenticity.
      *
-     * @dev Only the 'minter' contract (dWork instance deployed on Polygon) can perform this function.
+     * @dev Only the 'minter' contract (dWork instance deployed on Polygon Amoy) can perform this function.
      */
     function openTokenizationRequest(
         string memory _customerSubmissionIPFSHash,
@@ -233,7 +226,7 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         ];
 
         if (!tokenizedWork.isMinted) {
-            revert dWork__WorkNotMinted();
+            revert dWork__TokenizationNotCompleted();
         }
 
         if (tokenizedWork.isFractionalized) {
@@ -324,11 +317,11 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
      * @param _workTokenId The ID of the work token to be listed for sale.
      * @param _listPriceUsd The price at which the work token will be listed.
      * @notice List a work token for sale.
-     * @dev Transfer the work token to the dWork contract and set the listing price.
+     * @dev Transfer the work token ownership to the dWork contract and set the listing price.
      */
     function listWorkToken(
-        uint256 _listPriceUsd,
-        uint256 _workTokenId
+        uint256 _workTokenId,
+        uint256 _listPriceUsd
     ) external {
         TokenizedWork storage tokenizedWork = s_tokenizedWorkByTokenId[
             _workTokenId
@@ -382,6 +375,7 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         }
 
         address previousOwner = tokenizedWork.owner;
+
         // Update the tokenized work data
         _updateTokenizedWorkOnSale(tokenizedWork);
 
@@ -394,18 +388,10 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
 
         // If the work is fractionalized, we call the WorkSharesManager contract to enable the share holders to claim their share of the sale.
         if (tokenizedWork.isFractionalized) {
-            IDWorkSharesManager.WorkShares
-                memory workShare = IDWorkSharesManager(s_workSharesManager)
-                    .getWorkShareByWorkTokenId(tokenizedWork.workTokenId);
-
-            // If the work was sent to another chain, we need to send a CCIP message
+            // If the work token was sent to another chain, we need to send a CCIP message
             // to the chain where the shares were originally minted along with the sale value in USDC.
             if (POLYGON_AMOY_CHAIN_ID != block.chainid) {
-                _xChainOnWorkSold(
-                    tokenizedWork.sharesTokenId,
-                    sellValueUSDC,
-                    workShare.mintedChain
-                );
+                _xChainOnWorkSold(tokenizedWork.sharesTokenId, sellValueUSDC);
             } else {
                 // If the shares were minted on the same chain as the associated work is on, we transfer the USDC value to the WorkSharesManager contract.
                 bool sharesManagerSendingSuccess = IERC20(i_usdc).transferFrom(
@@ -490,6 +476,13 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         _setChainSharesManager(_chainSelector, _sharesManagerAddress);
     }
 
+    function setChainSelector(
+        uint256 _chainId,
+        uint64 _chainSelector
+    ) external onlyOwner {
+        _setChainSelector(_chainId, _chainSelector);
+    }
+
     function pauseWorkToken(uint256 _tokenizationRequestId) external onlyOwner {
         _pauseWorkToken(_tokenizationRequestId);
     }
@@ -556,11 +549,7 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
     ) internal {
         // Within the Chainlink Functions request, gpt-4o is instructed to return empty strings if he can't extract the artist and work from the certificate.
         if (bytes(_artist).length == 0 || bytes(_work).length == 0) {
-            emit CertificateExtractionError(
-                _tokenizationRequestId,
-                _artist,
-                _work
-            );
+            emit CertificateExtractionError(_tokenizationRequestId);
             return;
         }
 
@@ -585,7 +574,7 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
     ) internal {
         // Within the Chainlink Functions request, the computation will return a price of 0 if discrepancies are found.
         if (_priceUsd == 0) {
-            emit WorkVerificationError(_tokenizationRequestId, _ownerName);
+            emit WorkVerificationError(_tokenizationRequestId);
             return;
         }
 
@@ -614,7 +603,7 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
 
     /**
      * @dev Compare the latest appraiser report with the previous one to verify the work.
-     * If there is a significant difference, freeze the work contract
+     * If there is a significant difference, freeze the work contract as well as the minted shares tokens.
      */
     function _compareLatestAppraiserReport(
         uint256 _tokenizationRequestId,

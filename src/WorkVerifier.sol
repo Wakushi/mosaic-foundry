@@ -88,7 +88,7 @@ contract WorkVerifier is FunctionsClient, Ownable {
     /**
      * @param _tokenizationRequestId Tokenization request ID registered on dWork
      * @param _args Arguments to be passed to the Chainlink DON, here the IPFS hash of the certificate of authenticity
-     * @dev Sends a request to the Chainlink DON to extract the artist and work name from the certificate of authenticity
+     * @dev Sends a request to the Chainlink DON to extract the artist and work name from the certificate of authenticity using OpenAI GPT-4o vision.
      */
     function sendCertificateExtractionRequest(
         uint256 _tokenizationRequestId,

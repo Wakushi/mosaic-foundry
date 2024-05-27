@@ -10,7 +10,6 @@ interface IDWorkSharesManager {
         uint256 totalSellValueUsd;
         address workOwner;
         uint256 redeemableValuePerShare;
-        uint256 mintedChain;
         bool isPaused;
         bool isRedeemable;
     }
@@ -30,8 +29,4 @@ interface IDWorkSharesManager {
     function pauseShares(uint256 _tokenizationRequestId) external;
 
     function unpauseShares(uint256 _tokenizationRequestId) external;
-
-    function getWorkShareByWorkTokenId(
-        uint256 _workTokenId
-    ) external view returns (WorkShares memory);
 }

@@ -91,7 +91,7 @@ contract TokenizedAsset is ERC721, ERC721URIStorage, ERC721Burnable {
     // Functions
     //////////////////
 
-    constructor() ERC721("TokenizedAsset", "TKA") {}
+    constructor() ERC721("xArtwork", "xART") {}
 
     ////////////////////
     // External / Public
@@ -153,32 +153,32 @@ contract TokenizedAsset is ERC721, ERC721URIStorage, ERC721Burnable {
     }
 
     function _createTokenizedWork(
-        IDWorkConfig.xChainWorkTokenTransferData memory data
+        IDWorkConfig.xChainWorkTokenTransferData memory _workData
     ) internal {
         _registerTokenizationRequest(
             "",
             "",
             "",
-            data.to,
-            data.tokenizationRequestId
+            _workData.to,
+            _workData.tokenizationRequestId
         );
 
         TokenizedWork storage tokenizedWork = s_tokenizationRequests[
-            data.tokenizationRequestId
+            _workData.tokenizationRequestId
         ];
 
-        tokenizedWork.workTokenId = data.workTokenId;
-        tokenizedWork.ownerName = data.ownerName;
-        tokenizedWork.lastWorkPriceUsd = data.lastWorkPriceUsd;
+        tokenizedWork.workTokenId = _workData.workTokenId;
+        tokenizedWork.ownerName = _workData.ownerName;
+        tokenizedWork.lastWorkPriceUsd = _workData.lastWorkPriceUsd;
         tokenizedWork.verificationStep = VerificationStep.Tokenized;
         tokenizedWork.isMinted = true;
         tokenizedWork.certificate = WorkCertificate({
-            artist: data.artist,
-            work: data.work
+            artist: _workData.artist,
+            work: _workData.work
         });
 
-        if (data.sharesTokenId != 0) {
-            tokenizedWork.sharesTokenId = data.sharesTokenId;
+        if (_workData.sharesTokenId != 0) {
+            tokenizedWork.sharesTokenId = _workData.sharesTokenId;
             tokenizedWork.isFractionalized = true;
         }
     }
@@ -192,9 +192,11 @@ contract TokenizedAsset is ERC721, ERC721URIStorage, ERC721Burnable {
             _tokenizationRequestId
         ];
 
-        _mintWork(_tokenizationRequestId);
+        _mintWork(tokenizedWork.owner);
 
         tokenizedWork.isMinted = true;
+        tokenizedWork.workTokenId = s_tokenId;
+        s_tokenizedWorkByTokenId[s_tokenId] = tokenizedWork;
         tokenizedWork.ownerName = _verifiedOwnerName;
         tokenizedWork.lastWorkPriceUsd = _verifiedPriceUsd;
         tokenizedWork.verificationStep = VerificationStep.Tokenized;
@@ -202,19 +204,9 @@ contract TokenizedAsset is ERC721, ERC721URIStorage, ERC721Burnable {
         emit WorkTokenized(_tokenizationRequestId);
     }
 
-    function _mintWork(uint256 _tokenizationRequestId) internal {
+    function _mintWork(address _owner) internal {
         ++s_tokenId;
-        TokenizedWork storage tokenizedWork = s_tokenizationRequests[
-            _tokenizationRequestId
-        ];
-        tokenizedWork.isMinted = true;
-        tokenizedWork.workTokenId = s_tokenId;
-        s_tokenizedWorkByTokenId[s_tokenId] = tokenizedWork;
-
-        _safeMint(
-            s_tokenizationRequests[_tokenizationRequestId].owner,
-            s_tokenId
-        );
+        _safeMint(_owner, s_tokenId);
     }
 
     function _updateTokenizedWorkOnSale(

@@ -122,8 +122,19 @@ contract xChainAsset is
     // External / Public
     ////////////////////
 
+    /**
+     *
+     * @param _to Destination address for the work token
+     * @param _newOwnerName New owner name for the work token
+     * @param _tokenizationRequestId Tokenization request ID
+     * @param _destinationChainSelector  Destination chain selector
+     * @param _payFeesIn Pay fees in LINK or Native token
+     * @param _gasLimit Gas limit for the cross-chain transaction
+     * @dev Transfers a work token to a different chain using Chainlink CCIP. It burns the work token on the current chain and mints it on the destination chain.
+     */
     function xChainWorkTokenTransfer(
         address _to,
+        string memory _newOwnerName,
         uint256 _tokenizationRequestId,
         uint64 _destinationChainSelector,
         IDWorkConfig.PayFeesIn _payFeesIn,
@@ -134,7 +145,7 @@ contract xChainAsset is
         onlyEnabledChain(_destinationChainSelector)
         returns (bytes32 messageId)
     {
-        TokenizedWork storage tokenizedWork = s_tokenizationRequests[
+        TokenizedWork memory tokenizedWork = s_tokenizationRequests[
             _tokenizationRequestId
         ];
 
@@ -144,21 +155,21 @@ contract xChainAsset is
 
         _burn(tokenizedWork.workTokenId);
 
-        tokenizedWork.owner = _to;
+        delete s_tokenizationRequests[_tokenizationRequestId];
 
-        IDWorkConfig.xChainWorkTokenTransferData memory data = IDWorkConfig
+        IDWorkConfig.xChainWorkTokenTransferData memory workData = IDWorkConfig
             .xChainWorkTokenTransferData({
                 to: _to,
+                tokenizationRequestId: _tokenizationRequestId,
                 workTokenId: tokenizedWork.workTokenId,
-                ownerName: tokenizedWork.ownerName,
+                sharesTokenId: tokenizedWork.sharesTokenId,
+                ownerName: _newOwnerName,
                 lastWorkPriceUsd: tokenizedWork.lastWorkPriceUsd,
                 artist: tokenizedWork.certificate.artist,
-                work: tokenizedWork.certificate.work,
-                sharesTokenId: tokenizedWork.sharesTokenId,
-                tokenizationRequestId: _tokenizationRequestId
+                work: tokenizedWork.certificate.work
             });
 
-        bytes memory encodedArgs = _encodeArgs(data);
+        bytes memory encodedArgs = _encodeArgs(workData);
 
         Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
             receiver: abi.encode(s_chains[_destinationChainSelector]),
@@ -204,47 +215,12 @@ contract xChainAsset is
         );
     }
 
-    function _xChainOnWorkSold(
-        uint256 _sharesTokenId,
-        uint256 _sellValue,
-        uint256 _mintedChainId
-    ) internal returns (bytes32 messageId) {
-        uint64 destinationChainSelector = s_chainSelectors[_mintedChainId];
-
-        Client.EVMTokenAmount[]
-            memory tokenAmounts = new Client.EVMTokenAmount[](1);
-        Client.EVMTokenAmount memory tokenAmount = Client.EVMTokenAmount({
-            token: i_usdc,
-            amount: _sellValue
-        });
-        tokenAmounts[0] = tokenAmount;
-
-        Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
-            receiver: abi.encode(s_sharesManagers[destinationChainSelector]),
-            data: abi.encode(_sharesTokenId, _sellValue),
-            tokenAmounts: tokenAmounts,
-            extraArgs: Client._argsToBytes(
-                Client.EVMExtraArgsV1({gasLimit: 300000})
-            ),
-            feeToken: address(i_linkToken)
-        });
-
-        uint256 fees = i_ccipRouter.getFee(destinationChainSelector, message);
-
-        if (fees > i_linkToken.balanceOf(address(this))) {
-            revert dWork__NotEnoughBalanceForFees();
-        }
-
-        i_linkToken.approve(address(i_ccipRouter), fees);
-
-        IERC20(i_usdc).approve(address(i_ccipRouter), _sellValue);
-
-        messageId = i_ccipRouter.ccipSend{value: fees}(
-            destinationChainSelector,
-            message
-        );
-    }
-
+    /**
+     *
+     * @param message CCIP message
+     * @dev Called by the CCIP router when a work token is received from a different chain.
+     * It decodes the message's data and mints the work token on the current chain.
+     */
     function ccipReceive(
         Client.Any2EVMMessage calldata message
     )
@@ -260,15 +236,15 @@ contract xChainAsset is
         )
     {
         uint64 sourceChainSelector = message.sourceChainSelector;
-        IDWorkConfig.xChainWorkTokenTransferData memory data = _decodeWhole(
+        IDWorkConfig.xChainWorkTokenTransferData memory workData = _decodeWhole(
             message.data
         );
-        _safeMint(data.to, data.workTokenId);
-        _createTokenizedWork(data);
+        _safeMint(workData.to, workData.workTokenId);
+        _createTokenizedWork(workData);
 
         emit CrossChainReceived(
-            data.to,
-            data.workTokenId,
+            workData.to,
+            workData.workTokenId,
             sourceChainSelector,
             i_currentChainSelector
         );
@@ -277,6 +253,54 @@ contract xChainAsset is
     ////////////////////
     // Internal
     ////////////////////
+
+    /**
+     *
+     * @param _sharesTokenId Shares token ID
+     * @param _sellValueUSDC Sell value for the work token in USDC
+     * @dev This function is called when a work token is sold on a different chain than the 'minter' chain (Polygon Amoy).
+     * Its purpose is to transfer the USDC value of the work token to the WorkSharesManager contract on the 'minter' chain.
+     * The WorkSharesManager contract will then distribute the USDC value and make it redeemable by the work shares owners.
+     */
+    function _xChainOnWorkSold(
+        uint256 _sharesTokenId,
+        uint256 _sellValueUSDC
+    ) internal returns (bytes32 messageId) {
+        uint64 destinationChainSelector = POLYGON_AMOY_CHAIN_SELECTOR;
+
+        Client.EVMTokenAmount[]
+            memory tokenAmounts = new Client.EVMTokenAmount[](1);
+        Client.EVMTokenAmount memory tokenAmount = Client.EVMTokenAmount({
+            token: i_usdc,
+            amount: _sellValueUSDC
+        });
+        tokenAmounts[0] = tokenAmount;
+
+        Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
+            receiver: abi.encode(s_sharesManagers[destinationChainSelector]),
+            data: abi.encode(_sharesTokenId, _sellValueUSDC),
+            tokenAmounts: tokenAmounts,
+            extraArgs: Client._argsToBytes(
+                Client.EVMExtraArgsV1({gasLimit: 300000})
+            ),
+            feeToken: address(i_linkToken)
+        });
+
+        uint256 fees = i_ccipRouter.getFee(destinationChainSelector, message);
+
+        if (fees > i_linkToken.balanceOf(address(this))) {
+            revert dWork__NotEnoughBalanceForFees();
+        }
+
+        i_linkToken.approve(address(i_ccipRouter), fees);
+
+        IERC20(i_usdc).approve(address(i_ccipRouter), _sellValueUSDC);
+
+        messageId = i_ccipRouter.ccipSend{value: fees}(
+            destinationChainSelector,
+            message
+        );
+    }
 
     function _enableChain(
         uint64 _chainSelector,
@@ -292,12 +316,25 @@ contract xChainAsset is
         s_sharesManagers[_chainSelector] = _sharesManagerAddress;
     }
 
+    function _setChainSelector(
+        uint256 _chainId,
+        uint64 _chainSelector
+    ) internal {
+        s_chainSelectors[_chainId] = _chainSelector;
+    }
+
     function _encodeArgs(
         IDWorkConfig.xChainWorkTokenTransferData memory _encodeTokenTransferData
     ) internal pure returns (bytes memory) {
         bytes memory encodedArgs = abi.encode(
             _encodeTokenTransferData.to,
-            _encodeTokenTransferData.workTokenId
+            _encodeTokenTransferData.workTokenId,
+            _encodeTokenTransferData.ownerName,
+            _encodeTokenTransferData.lastWorkPriceUsd,
+            _encodeTokenTransferData.artist,
+            _encodeTokenTransferData.work,
+            _encodeTokenTransferData.sharesTokenId,
+            _encodeTokenTransferData.tokenizationRequestId
         );
         return encodedArgs;
     }

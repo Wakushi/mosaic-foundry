@@ -204,8 +204,7 @@ contract dWorkSharesManager is
             workOwner: _workOwner,
             isPaused: false,
             isRedeemable: false,
-            redeemableValuePerShare: 0,
-            mintedChain: block.chainid
+            redeemableValuePerShare: 0
         });
 
         s_sharesTokenIdByWorkId[_workTokenId] = s_shareTokenId;
@@ -277,7 +276,7 @@ contract dWorkSharesManager is
 
     /**
      * @param _sharesTokenId The token id of the share related to the work token that was fractionalized on dWork.sol
-     * @param _amount Amount of shares to buy
+     * @param _amount Amount of shares to list
      * @param _priceUsd Price of the share in USD
      * @dev Allows users to list shares of a work that was tokenized and fractionalized on dWork.sol
      */
