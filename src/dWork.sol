@@ -227,7 +227,7 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
         uint256 _tokenizationRequestId,
         uint256 _shareSupply,
         uint256 _sharePriceUsd
-    ) external onlyOwner {
+    ) external onlyOwner onlyOnPolygonAmoy {
         TokenizedWork storage tokenizedWork = s_tokenizationRequests[
             _tokenizationRequestId
         ];
@@ -398,9 +398,9 @@ contract dWork is xChainAsset, ILogAutomation, Ownable, Pausable {
                 memory workShare = IDWorkSharesManager(s_workSharesManager)
                     .getWorkShareByWorkTokenId(tokenizedWork.workTokenId);
 
-            // If the shares were minted on a different chain than the associated work is on, we send a CCIP message
-            // to the chain where the shares were minted along with the sale value in USDC.
-            if (workShare.mintedChain != block.chainid) {
+            // If the work was sent to another chain, we need to send a CCIP message
+            // to the chain where the shares were originally minted along with the sale value in USDC.
+            if (POLYGON_AMOY_CHAIN_ID != block.chainid) {
                 _xChainOnWorkSold(
                     tokenizedWork.sharesTokenId,
                     sellValueUSDC,

@@ -2,6 +2,11 @@
 pragma solidity ^0.8.19;
 
 interface IDWorkConfig {
+    enum PayFeesIn {
+        Native,
+        LINK
+    }
+
     struct dWorkConfig {
         address workSharesManagerAddress;
         address workVerifierAddress;

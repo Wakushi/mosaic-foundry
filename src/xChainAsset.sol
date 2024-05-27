@@ -20,15 +20,6 @@ contract xChainAsset is
     ReentrancyGuard
 {
     ///////////////////
-    // Type declarations
-    ///////////////////
-
-    enum PayFeesIn {
-        Native,
-        LINK
-    }
-
-    ///////////////////
     // State variables
     ///////////////////
 
@@ -135,7 +126,7 @@ contract xChainAsset is
         address _to,
         uint256 _tokenizationRequestId,
         uint64 _destinationChainSelector,
-        PayFeesIn _payFeesIn,
+        IDWorkConfig.PayFeesIn _payFeesIn,
         uint256 _gasLimit
     )
         public
@@ -176,14 +167,14 @@ contract xChainAsset is
             extraArgs: Client._argsToBytes(
                 Client.EVMExtraArgsV1({gasLimit: _gasLimit})
             ),
-            feeToken: _payFeesIn == PayFeesIn.LINK
+            feeToken: _payFeesIn == IDWorkConfig.PayFeesIn.LINK
                 ? address(i_linkToken)
                 : address(0)
         });
 
         uint256 fees = i_ccipRouter.getFee(_destinationChainSelector, message);
 
-        if (_payFeesIn == PayFeesIn.LINK) {
+        if (_payFeesIn == IDWorkConfig.PayFeesIn.LINK) {
             if (fees > i_linkToken.balanceOf(address(this))) {
                 revert dWork__NotEnoughBalanceForFees();
             }
