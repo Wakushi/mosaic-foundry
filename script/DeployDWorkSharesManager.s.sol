@@ -14,18 +14,19 @@ contract DeployDWorkSharesManager is Script {
         (
             ,
             ,
-            address priceFeed,
+            address nativeUsdPriceFeed,
             ,
             address ccipRouterAddress,
             address linkTokenAddress,
             uint64 chainSelector,
-            address usdcAddress
+            address usdcAddress,
+
         ) = helperConfig.activeNetworkConfig();
 
         vm.startBroadcast();
         dWorkSharesManager newDWorkShare = new dWorkSharesManager(
             BASE_URI,
-            priceFeed,
+            nativeUsdPriceFeed,
             ccipRouterAddress,
             linkTokenAddress,
             chainSelector,

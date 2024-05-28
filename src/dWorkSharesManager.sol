@@ -10,6 +10,7 @@ import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/
 import {LinkTokenInterface} from "@chainlink/contracts/src/v0.8/shared/interfaces/LinkTokenInterface.sol";
 // OpenZeppelin
 import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import {IERC1155Receiver} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -19,6 +20,7 @@ import {IDWorkSharesManager} from "./interfaces/IDWorkSharesManager.sol";
 
 contract dWorkSharesManager is
     ERC1155,
+    IERC1155Receiver,
     Ownable,
     IAny2EVMMessageReceiver,
     ReentrancyGuard
@@ -37,7 +39,7 @@ contract dWorkSharesManager is
     // State variables
     ///////////////////
 
-    AggregatorV3Interface private s_priceFeed;
+    AggregatorV3Interface private s_nativePriceFeed;
 
     IRouterClient internal immutable i_ccipRouter;
     LinkTokenInterface internal immutable i_linkToken;
@@ -164,7 +166,7 @@ contract dWorkSharesManager is
         uint64 _currentChainSelector,
         address _usdc
     ) ERC1155(_baseUri) Ownable(msg.sender) {
-        s_priceFeed = AggregatorV3Interface(_priceFeed);
+        s_nativePriceFeed = AggregatorV3Interface(_priceFeed);
         i_ccipRouter = IRouterClient(_ccipRouterAddress);
         i_linkToken = LinkTokenInterface(_linkTokenAddress);
         i_currentChainSelector = _currentChainSelector;
@@ -243,7 +245,7 @@ contract dWorkSharesManager is
             revert dWorkSharesManager__InitialSaleClosed();
         }
 
-        uint256 sentValueUsd = msg.value.getConversionRate(s_priceFeed);
+        uint256 sentValueUsd = msg.value.getConversionRate(s_nativePriceFeed);
         uint256 usdAmountDue = _shareAmount * workShares.sharePriceUsd;
 
         if (sentValueUsd < usdAmountDue) {
@@ -350,7 +352,7 @@ contract dWorkSharesManager is
             revert dWorkSharesManager__ItemAlreadySold();
         }
 
-        uint256 sentValueUsd = msg.value.getConversionRate(s_priceFeed);
+        uint256 sentValueUsd = msg.value.getConversionRate(s_nativePriceFeed);
 
         if (sentValueUsd < marketShareItem.priceUsd) {
             revert dWorkSharesManager__InsufficientFunds();
@@ -403,6 +405,14 @@ contract dWorkSharesManager is
         }
 
         s_isItemListed[_marketShareItemId] = false;
+
+        _safeTransferFrom(
+            address(this),
+            msg.sender,
+            marketShareItem.sharesTokenId,
+            1,
+            ""
+        );
 
         _unlistItem(_marketShareItemId);
 
@@ -666,7 +676,7 @@ contract dWorkSharesManager is
     }
 
     function getNativeTokenPriceUsd() external view returns (uint256) {
-        (, int256 answer, , , ) = s_priceFeed.latestRoundData();
+        (, int256 answer, , , ) = s_nativePriceFeed.latestRoundData();
         return uint256(answer * 10000000000);
     }
 
@@ -679,5 +689,25 @@ contract dWorkSharesManager is
         }
 
         return items;
+    }
+
+    function onERC1155Received(
+        address operator,
+        address from,
+        uint256 id,
+        uint256 value,
+        bytes calldata data
+    ) external returns (bytes4) {
+        return this.onERC1155Received.selector;
+    }
+
+    function onERC1155BatchReceived(
+        address operator,
+        address from,
+        uint256[] calldata ids,
+        uint256[] calldata values,
+        bytes calldata data
+    ) external returns (bytes4) {
+        return this.onERC1155BatchReceived.selector;
     }
 }

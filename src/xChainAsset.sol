@@ -19,55 +19,32 @@ contract xChainAsset is
     IAny2EVMMessageReceiver,
     ReentrancyGuard
 {
-    ///////////////////
-    // State variables
-    ///////////////////
-
-    // Chainlink CCIP
-    uint256 constant POLYGON_AMOY_CHAIN_ID = 80002;
     uint64 constant POLYGON_AMOY_CHAIN_SELECTOR = 16281711391670634445;
-    uint256 constant OPTIMISM_SEPOLIA_CHAIN_ID = 11155420;
     uint64 constant OPTIMISM_SEPOLIA_CHAIN_SELECTOR = 5224473277236331295;
 
     IRouterClient internal immutable i_ccipRouter;
     LinkTokenInterface internal immutable i_linkToken;
-    uint64 private immutable i_currentChainSelector;
     address immutable i_usdc;
 
     mapping(uint64 destChainSelector => address xWorkAddress) s_chains;
     mapping(uint256 chainId => uint64 chainSelector) s_chainSelectors;
     mapping(uint64 destChainSelector => address xWorkSharesManagerAddress) s_sharesManagers;
 
-    ///////////////////
-    // Events
-    ///////////////////
-
     event CrossChainSent(
         address to,
         uint256 tokenId,
-        uint64 sourceChainSelector,
         uint64 destinationChainSelector
     );
     event CrossChainReceived(
         address to,
         uint256 tokenId,
-        uint64 sourceChainSelector,
-        uint64 destinationChainSelector
+        uint64 sourceChainSelector
     );
-
-    //////////////////
-    // Errors
-    //////////////////
 
     error dWork__InvalidRouter();
     error dWork__ChainNotEnabled();
     error dWork__SenderNotEnabled();
     error dWork__NotEnoughBalanceForFees();
-    error dWork__OnlyOnPolygonAmoy();
-
-    //////////////////
-    // Modifiers
-    //////////////////
 
     modifier onlyRouter() {
         if (msg.sender != address(i_ccipRouter)) {
@@ -90,27 +67,16 @@ contract xChainAsset is
         _;
     }
 
-    modifier onlyOnPolygonAmoy() {
-        if (block.chainid != POLYGON_AMOY_CHAIN_ID) {
-            revert dWork__OnlyOnPolygonAmoy();
-        }
-        _;
-    }
-
-    //////////////////
-    // Functions
-    //////////////////
-
     constructor(
         address _ccipRouterAddress,
         address _linkTokenAddress,
-        uint64 _currentChainSelector,
-        address _usdc
-    ) {
+        address _usdc,
+        address _workVerifier,
+        address _workSharesManager
+    ) TokenizedAsset(_workVerifier, _workSharesManager) {
         if (_ccipRouterAddress == address(0)) revert dWork__InvalidRouter();
         i_ccipRouter = IRouterClient(_ccipRouterAddress);
         i_linkToken = LinkTokenInterface(_linkTokenAddress);
-        i_currentChainSelector = _currentChainSelector;
         i_usdc = _usdc;
         s_chainSelectors[POLYGON_AMOY_CHAIN_ID] = POLYGON_AMOY_CHAIN_SELECTOR;
         s_chainSelectors[
@@ -118,18 +84,7 @@ contract xChainAsset is
         ] = OPTIMISM_SEPOLIA_CHAIN_SELECTOR;
     }
 
-    ////////////////////
-    // External / Public
-    ////////////////////
-
     /**
-     *
-     * @param _to Destination address for the work token
-     * @param _newOwnerName New owner name for the work token
-     * @param _tokenizationRequestId Tokenization request ID
-     * @param _destinationChainSelector  Destination chain selector
-     * @param _payFeesIn Pay fees in LINK or Native token
-     * @param _gasLimit Gas limit for the cross-chain transaction
      * @dev Transfers a work token to a different chain using Chainlink CCIP. It burns the work token on the current chain and mints it on the destination chain.
      */
     function xChainWorkTokenTransfer(
@@ -210,7 +165,6 @@ contract xChainAsset is
         emit CrossChainSent(
             _to,
             tokenizedWork.workTokenId,
-            i_currentChainSelector,
             _destinationChainSelector
         );
     }
@@ -235,7 +189,6 @@ contract xChainAsset is
             abi.decode(message.sender, (address))
         )
     {
-        uint64 sourceChainSelector = message.sourceChainSelector;
         IDWorkConfig.xChainWorkTokenTransferData memory workData = _decodeWhole(
             message.data
         );
@@ -245,19 +198,11 @@ contract xChainAsset is
         emit CrossChainReceived(
             workData.to,
             workData.workTokenId,
-            sourceChainSelector,
-            i_currentChainSelector
+            message.sourceChainSelector
         );
     }
 
-    ////////////////////
-    // Internal
-    ////////////////////
-
     /**
-     *
-     * @param _sharesTokenId Shares token ID
-     * @param _sellValueUSDC Sell value for the work token in USDC
      * @dev This function is called when a work token is sold on a different chain than the 'minter' chain (Polygon Amoy).
      * Its purpose is to transfer the USDC value of the work token to the WorkSharesManager contract on the 'minter' chain.
      * The WorkSharesManager contract will then distribute the USDC value and make it redeemable by the work shares owners.
@@ -266,8 +211,6 @@ contract xChainAsset is
         uint256 _sharesTokenId,
         uint256 _sellValueUSDC
     ) internal returns (bytes32 messageId) {
-        uint64 destinationChainSelector = POLYGON_AMOY_CHAIN_SELECTOR;
-
         Client.EVMTokenAmount[]
             memory tokenAmounts = new Client.EVMTokenAmount[](1);
         Client.EVMTokenAmount memory tokenAmount = Client.EVMTokenAmount({
@@ -277,7 +220,7 @@ contract xChainAsset is
         tokenAmounts[0] = tokenAmount;
 
         Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
-            receiver: abi.encode(s_sharesManagers[destinationChainSelector]),
+            receiver: abi.encode(s_sharesManagers[POLYGON_AMOY_CHAIN_SELECTOR]),
             data: abi.encode(_sharesTokenId, _sellValueUSDC),
             tokenAmounts: tokenAmounts,
             extraArgs: Client._argsToBytes(
@@ -286,7 +229,10 @@ contract xChainAsset is
             feeToken: address(i_linkToken)
         });
 
-        uint256 fees = i_ccipRouter.getFee(destinationChainSelector, message);
+        uint256 fees = i_ccipRouter.getFee(
+            POLYGON_AMOY_CHAIN_SELECTOR,
+            message
+        );
 
         if (fees > i_linkToken.balanceOf(address(this))) {
             revert dWork__NotEnoughBalanceForFees();
@@ -297,29 +243,29 @@ contract xChainAsset is
         IERC20(i_usdc).approve(address(i_ccipRouter), _sellValueUSDC);
 
         messageId = i_ccipRouter.ccipSend{value: fees}(
-            destinationChainSelector,
+            POLYGON_AMOY_CHAIN_SELECTOR,
             message
         );
     }
 
-    function _enableChain(
+    function enableChain(
         uint64 _chainSelector,
         address _xWorkAddress
-    ) internal {
+    ) external onlyOwner {
         s_chains[_chainSelector] = _xWorkAddress;
     }
 
-    function _setChainSharesManager(
+    function setChainSharesManager(
         uint64 _chainSelector,
         address _sharesManagerAddress
-    ) internal {
+    ) external onlyOwner {
         s_sharesManagers[_chainSelector] = _sharesManagerAddress;
     }
 
-    function _setChainSelector(
+    function setChainSelector(
         uint256 _chainId,
         uint64 _chainSelector
-    ) internal {
+    ) external onlyOwner {
         s_chainSelectors[_chainId] = _chainSelector;
     }
 

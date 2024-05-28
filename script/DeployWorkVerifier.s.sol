@@ -13,7 +13,7 @@ contract DeployWorkVerifier is Script {
     string constant CERTIFICATE_EXTRACTION_SOURCE =
         "./functions/sources/certificate-extraction-source.js";
     bytes constant DON_SECRETS_REFERENCE =
-        hex"a266736c6f744964006776657273696f6e1a664da557";
+        hex"a266736c6f744964006776657273696f6e1a6654e596";
 
     function run() external {
         IGetWorkVerifierReturnTypes.GetWorkVerifierReturnType
@@ -46,6 +46,7 @@ contract DeployWorkVerifier is Script {
             address functionsRouter,
             ,
             uint64 functionsSubId,
+            ,
             ,
             ,
             ,

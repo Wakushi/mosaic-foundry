@@ -10,12 +10,13 @@ contract HelperConfig is Script {
     struct NetworkConfig {
         bytes32 donId;
         address functionsRouter;
-        address priceFeed;
+        address nativeUsdPriceFeed;
         uint64 functionsSubId;
         address ccipRouterAddress;
         address linkTokenAddress;
         uint64 chainSelector;
         address usdcAddress;
+        address usdcPriceFeed;
     }
 
     uint256 public constant DEFAULT_ANVIL_KEY =
@@ -39,7 +40,8 @@ contract HelperConfig is Script {
             NetworkConfig({
                 donId: bytes32("fun-polygon-amoy-1"),
                 functionsRouter: 0xC22a79eBA640940ABB6dF0f7982cc119578E11De,
-                priceFeed: 0x001382149eBa3441043c1c66972b4772963f5D43,
+                nativeUsdPriceFeed: 0x001382149eBa3441043c1c66972b4772963f5D43,
+                usdcPriceFeed: 0x1b8739bB4CdF0089d07097A9Ae5Bd274b29C6F16,
                 functionsSubId: 212,
                 ccipRouterAddress: 0x9C32fCB86BF0f4a1A8921a9Fe46de3198bb884B2,
                 linkTokenAddress: 0x0Fd9e8d3aF1aaee056EB9e802c3A762a667b1904,
@@ -57,7 +59,8 @@ contract HelperConfig is Script {
             NetworkConfig({
                 donId: bytes32("fun-optimism-sepolia-1"),
                 functionsRouter: 0xC17094E3A1348E5C7544D4fF8A36c28f2C6AAE28,
-                priceFeed: 0x001382149eBa3441043c1c66972b4772963f5D43,
+                nativeUsdPriceFeed: 0x001382149eBa3441043c1c66972b4772963f5D43,
+                usdcPriceFeed: 0x1b8739bB4CdF0089d07097A9Ae5Bd274b29C6F16,
                 functionsSubId: 192,
                 ccipRouterAddress: 0x114A20A10b43D4115e5aeef7345a1A71d2a60C57,
                 linkTokenAddress: 0xE4aB69C077896252FAFBD49EFD26B5D171A32410,
@@ -90,7 +93,8 @@ contract HelperConfig is Script {
             NetworkConfig({
                 donId: bytes32("fun-ethereum-sepolia-1"),
                 functionsRouter: 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419,
-                priceFeed: address(mockPriceFeed),
+                nativeUsdPriceFeed: address(mockPriceFeed),
+                usdcPriceFeed: address(mockPriceFeed),
                 functionsSubId: 0,
                 ccipRouterAddress: 0x9C32fCB86BF0f4a1A8921a9Fe46de3198bb884B2,
                 linkTokenAddress: address(link),
