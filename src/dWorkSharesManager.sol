@@ -2,29 +2,35 @@
 
 pragma solidity ^0.8.19;
 
-import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+// Chainlink
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {IAny2EVMMessageReceiver} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IAny2EVMMessageReceiver.sol";
+import {Client} from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
+import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IRouterClient.sol";
+import {LinkTokenInterface} from "@chainlink/contracts/src/v0.8/shared/interfaces/LinkTokenInterface.sol";
+// OpenZeppelin
+import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import {IERC1155Receiver} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+// Custom
 import {PriceConverter} from "./libraries/PriceConverter.sol";
+import {IDWorkSharesManager} from "./interfaces/IDWorkSharesManager.sol";
 
-contract dWorkSharesManager is ERC1155, Ownable {
+contract dWorkSharesManager is
+    ERC1155,
+    IERC1155Receiver,
+    Ownable,
+    IAny2EVMMessageReceiver,
+    ReentrancyGuard
+{
     using PriceConverter for uint256;
-
-    struct WorkShares {
-        uint256 maxShareSupply;
-        uint256 sharePriceUsd;
-        uint256 workTokenId;
-        uint256 totalShareBought;
-        uint256 totalSellValueUsd;
-        address workOwner;
-        uint256 redeemableValuePerShare;
-        bool isPaused;
-        bool isRedeemable;
-    }
 
     struct MarketShareItem {
         uint256 itemId;
         uint256 sharesTokenId;
+        uint256 amount;
         uint256 priceUsd;
         address seller;
         bool isSold;
@@ -34,14 +40,20 @@ contract dWorkSharesManager is ERC1155, Ownable {
     // State variables
     ///////////////////
 
-    AggregatorV3Interface private s_priceFeed;
+    AggregatorV3Interface private s_nativePriceFeed;
+
+    IRouterClient internal immutable i_ccipRouter;
+    LinkTokenInterface internal immutable i_linkToken;
+    address internal immutable i_usdc;
+    uint64 private immutable i_currentChainSelector;
+    mapping(uint64 destChainSelector => address xWorkAddress) s_chains;
 
     address s_dWork;
     uint256 s_shareTokenId;
     uint256 s_marketShareItemId;
     uint256[] s_listedShareItemsIds;
 
-    mapping(uint256 sharesTokenId => WorkShares workShares) s_workShares;
+    mapping(uint256 sharesTokenId => IDWorkSharesManager.WorkShares workShares) s_workShares;
     mapping(uint256 workTokenId => uint256 sharesTokenId) s_sharesTokenIdByWorkId;
     mapping(uint256 marketShareItemId => MarketShareItem marketShareItem) s_marketShareItems;
     mapping(uint256 marketShareItemId => bool isListed) s_isItemListed;
@@ -60,7 +72,10 @@ contract dWorkSharesManager is ERC1155, Ownable {
         address workOwner
     );
     event ShareBought(uint256 sharesTokenId, uint256 amount, address buyer);
-    event SharesPaused(WorkShares workShares, bool isPaused);
+    event SharesPaused(
+        IDWorkSharesManager.WorkShares workShares,
+        bool isPaused
+    );
     event MarketShareItemListed(
         uint256 marketShareItemId,
         uint256 sharesTokenId,
@@ -93,6 +108,12 @@ contract dWorkSharesManager is ERC1155, Ownable {
     error dWorkSharesManager__SharesNotOwned();
     error dWorkSharesManager__TransferFailedOnRedeem();
     error dWorkSharesManager__RedeemableValueExceeded();
+    error dWorkSharesManager__SellValueError();
+    error dWorkSharesManager__InvalidRouter();
+    error dWorkSharesManager__ChainNotEnabled();
+    error dWorkSharesManager__SenderNotEnabled();
+    error dWorkSharesManager__NotEnoughBalanceForFees();
+    error dWorkSharesManager__TransferFailed();
 
     //////////////////
     // Modifiers
@@ -113,36 +134,71 @@ contract dWorkSharesManager is ERC1155, Ownable {
         _;
     }
 
+    modifier onlyRouter() {
+        if (msg.sender != address(i_ccipRouter)) {
+            revert dWorkSharesManager__InvalidRouter();
+        }
+        _;
+    }
+
+    modifier onlyEnabledChain(uint64 _chainSelector) {
+        if (s_chains[_chainSelector] == address(0)) {
+            revert dWorkSharesManager__ChainNotEnabled();
+        }
+        _;
+    }
+
+    modifier onlyEnabledSender(uint64 _chainSelector, address _sender) {
+        if (s_chains[_chainSelector] != _sender) {
+            revert dWorkSharesManager__SenderNotEnabled();
+        }
+        _;
+    }
+
     //////////////////
     // Functions
     //////////////////
 
     constructor(
         string memory _baseUri,
-        address _priceFeed
+        address _priceFeed,
+        address _ccipRouterAddress,
+        address _linkTokenAddress,
+        uint64 _currentChainSelector,
+        address _usdc
     ) ERC1155(_baseUri) Ownable(msg.sender) {
-        s_priceFeed = AggregatorV3Interface(_priceFeed);
+        s_nativePriceFeed = AggregatorV3Interface(_priceFeed);
+        i_ccipRouter = IRouterClient(_ccipRouterAddress);
+        i_linkToken = LinkTokenInterface(_linkTokenAddress);
+        i_currentChainSelector = _currentChainSelector;
+        i_usdc = _usdc;
     }
 
     ////////////////////
     // External / Public
     ////////////////////
 
+    /**
+     *
+     * @param _workTokenId Token id of the tokenized work on dWork.sol
+     * @param _workOwner Owner of the work token
+     * @param _shareSupply Total supply of the created shares
+     * @param _sharePriceUsd Price of each share in USD
+     * @dev Creates shares for a work that was tokenized on dWork.sol
+     */
     function createShares(
         uint256 _workTokenId,
         address _workOwner,
         uint256 _shareSupply,
         uint256 _sharePriceUsd
-    ) external returns (uint256) {
-        _ensureOnlydWork();
-
+    ) external onlyDWork returns (uint256) {
         unchecked {
             ++s_shareTokenId;
         }
 
         _mint(_workOwner, s_shareTokenId, _shareSupply, "");
 
-        s_workShares[s_shareTokenId] = WorkShares({
+        s_workShares[s_shareTokenId] = IDWorkSharesManager.WorkShares({
             maxShareSupply: _shareSupply,
             sharePriceUsd: _sharePriceUsd,
             workTokenId: _workTokenId,
@@ -166,15 +222,22 @@ contract dWorkSharesManager is ERC1155, Ownable {
         return s_shareTokenId;
     }
 
+    /**
+     * @param _sharesTokenId The token id of the share related to the work token that was fractionalized on dWork.sol
+     * @param _shareAmount Amount of shares to buy
+     * @dev Allows users to buy shares of a work that was tokenized and fractionalized on dWork.sol
+     */
     function buyInitialShare(
         uint256 _sharesTokenId,
         uint256 _shareAmount
-    ) external payable whenSharesNotPaused(_sharesTokenId) {
+    ) external payable whenSharesNotPaused(_sharesTokenId) nonReentrant {
         if (_sharesTokenId == 0) {
             revert dWorkSharesManager__TokenIdDoesNotExist();
         }
 
-        WorkShares storage workShares = s_workShares[_sharesTokenId];
+        IDWorkSharesManager.WorkShares storage workShares = s_workShares[
+            _sharesTokenId
+        ];
 
         if (
             workShares.totalShareBought + _shareAmount >
@@ -183,7 +246,7 @@ contract dWorkSharesManager is ERC1155, Ownable {
             revert dWorkSharesManager__InitialSaleClosed();
         }
 
-        uint256 sentValueUsd = msg.value.getConversionRate(s_priceFeed);
+        uint256 sentValueUsd = msg.value.getConversionRate(s_nativePriceFeed);
         uint256 usdAmountDue = _shareAmount * workShares.sharePriceUsd;
 
         if (sentValueUsd < usdAmountDue) {
@@ -191,8 +254,16 @@ contract dWorkSharesManager is ERC1155, Ownable {
         }
 
         unchecked {
-            ++workShares.totalShareBought;
+            workShares.totalShareBought += _shareAmount;
             workShares.totalSellValueUsd += usdAmountDue;
+        }
+
+        (bool success, ) = payable(workShares.workOwner).call{value: msg.value}(
+            ""
+        );
+
+        if (!success) {
+            revert dWorkSharesManager__TransferFailed();
         }
 
         _safeTransferFrom(
@@ -206,11 +277,21 @@ contract dWorkSharesManager is ERC1155, Ownable {
         emit ShareBought(_sharesTokenId, _shareAmount, msg.sender);
     }
 
+    /**
+     * @param _sharesTokenId The token id of the share related to the work token that was fractionalized on dWork.sol
+     * @param _amount Amount of shares to list
+     * @param _priceUsd Price of the share in USD
+     * @dev Allows users to list shares of a work that was tokenized and fractionalized on dWork.sol
+     */
     function listMarketShareItem(
         uint256 _sharesTokenId,
         uint256 _amount,
         uint256 _priceUsd
-    ) external whenSharesNotPaused(_sharesTokenId) returns (uint256) {
+    )
+        external
+        whenSharesNotPaused(_sharesTokenId)
+        returns (uint256 marketShareItemId)
+    {
         if (_sharesTokenId == 0) {
             revert dWorkSharesManager__TokenIdDoesNotExist();
         }
@@ -230,6 +311,7 @@ contract dWorkSharesManager is ERC1155, Ownable {
         s_marketShareItems[s_marketShareItemId] = MarketShareItem({
             itemId: s_marketShareItemId,
             sharesTokenId: _sharesTokenId,
+            amount: _amount,
             priceUsd: _priceUsd,
             seller: msg.sender,
             isSold: false
@@ -253,7 +335,13 @@ contract dWorkSharesManager is ERC1155, Ownable {
         return s_marketShareItemId;
     }
 
-    function buyMarketShareItem(uint256 _marketShareItemId) external payable {
+    /**
+     * @param _marketShareItemId The id of the market share item to buy
+     * @dev Allows users to buy a listed share item
+     */
+    function buyMarketShareItem(
+        uint256 _marketShareItemId
+    ) external payable nonReentrant {
         if (!s_isItemListed[_marketShareItemId]) {
             revert dWorkSharesManager__ItemNotListed();
         }
@@ -266,10 +354,18 @@ contract dWorkSharesManager is ERC1155, Ownable {
             revert dWorkSharesManager__ItemAlreadySold();
         }
 
-        uint256 sentValueUsd = msg.value.getConversionRate(s_priceFeed);
+        uint256 sentValueUsd = msg.value.getConversionRate(s_nativePriceFeed);
 
         if (sentValueUsd < marketShareItem.priceUsd) {
             revert dWorkSharesManager__InsufficientFunds();
+        }
+
+        (bool success, ) = payable(marketShareItem.seller).call{
+            value: msg.value
+        }("");
+
+        if (!success) {
+            revert dWorkSharesManager__TransferFailed();
         }
 
         _safeTransferFrom(
@@ -293,6 +389,10 @@ contract dWorkSharesManager is ERC1155, Ownable {
         );
     }
 
+    /**
+     * @param _marketShareItemId The id of the market share item to unlist
+     * @dev Allows users to unlist a listed share item
+     */
     function unlistMarketShareItem(uint256 _marketShareItemId) external {
         if (!s_isItemListed[_marketShareItemId]) {
             revert dWorkSharesManager__ItemNotListed();
@@ -308,6 +408,14 @@ contract dWorkSharesManager is ERC1155, Ownable {
 
         s_isItemListed[_marketShareItemId] = false;
 
+        _safeTransferFrom(
+            address(this),
+            msg.sender,
+            marketShareItem.sharesTokenId,
+            1,
+            ""
+        );
+
         _unlistItem(_marketShareItemId);
 
         emit MarketShareItemUnlisted(_marketShareItemId);
@@ -318,16 +426,19 @@ contract dWorkSharesManager is ERC1155, Ownable {
      * @dev Called by dWork contract when a work is sold. Its job is to set the work shares as redeemable
      * and set the redeemable value per share so they can be redeemed and burn by the share holders.
      */
-    function onWorkSold(uint256 _sharesTokenId) external payable onlyDWork {
-        WorkShares storage workShares = s_workShares[_sharesTokenId];
-        workShares.isRedeemable = true;
-        workShares.redeemableValuePerShare =
-            msg.value /
-            workShares.maxShareSupply;
-        s_totalRedeemableValuePerWork[_sharesTokenId] = msg.value;
+    function onWorkSold(
+        uint256 _sharesTokenId,
+        uint256 _sellValueUSDC
+    ) external onlyDWork {
+        _onWorkSold(_sharesTokenId, _sellValueUSDC);
     }
 
-    function redeemAndBurnShares(
+    /**
+     * @param _shareTokenId The token id of the share related to the work token that was sold on dWork.sol
+     * @param _shareAmount Amount of shares to redeem
+     * @dev Allows users to burn and redeem their shares for the value they are worth in USDC
+     */
+    function redeemAndBurnSharesForUSDC(
         uint256 _shareTokenId,
         uint256 _shareAmount
     ) external {
@@ -335,7 +446,8 @@ contract dWorkSharesManager is ERC1155, Ownable {
             revert dWorkSharesManager__SharesNotOwned();
         }
 
-        WorkShares memory workShare = getWorkSharesByTokenId(_shareTokenId);
+        IDWorkSharesManager.WorkShares
+            memory workShare = getWorkSharesByTokenId(_shareTokenId);
 
         if (!workShare.isRedeemable) {
             revert dWorkSharesManager__ShareNotRedeemable();
@@ -347,28 +459,37 @@ contract dWorkSharesManager is ERC1155, Ownable {
         s_totalRedeemableValuePerWork[_shareTokenId] -= redeemableValue;
         _burn(msg.sender, _shareTokenId, _shareAmount);
 
-        (bool success, ) = payable(msg.sender).call{value: redeemableValue}("");
+        bool success = IERC20(i_usdc).transferFrom(
+            address(this),
+            msg.sender,
+            redeemableValue
+        );
+
         if (!success) {
             revert dWorkSharesManager__TransferFailedOnRedeem();
         }
     }
 
-    function setDWorkAddress(address _dWork) external onlyOwner {
-        s_dWork = _dWork;
-    }
+    function ccipReceive(
+        Client.Any2EVMMessage calldata message
+    )
+        external
+        virtual
+        override
+        onlyRouter
+        nonReentrant
+        onlyEnabledChain(message.sourceChainSelector)
+        onlyEnabledSender(
+            message.sourceChainSelector,
+            abi.decode(message.sender, (address))
+        )
+    {
+        (uint256 sharesTokenId, uint256 sellValue) = abi.decode(
+            message.data,
+            (uint256, uint256)
+        );
 
-    function pauseShares(uint256 _workTokenId) external onlyDWork {
-        uint256 sharesTokenId = s_sharesTokenIdByWorkId[_workTokenId];
-        WorkShares storage workShares = s_workShares[sharesTokenId];
-        workShares.isPaused = true;
-        emit SharesPaused(workShares, true);
-    }
-
-    function unpauseShares(uint256 _workTokenId) external onlyDWork {
-        uint256 sharesTokenId = s_sharesTokenIdByWorkId[_workTokenId];
-        WorkShares storage workShares = s_workShares[sharesTokenId];
-        workShares.isPaused = false;
-        emit SharesPaused(workShares, false);
+        _onWorkSold(sharesTokenId, sellValue);
     }
 
     function safeTransferFrom(
@@ -391,9 +512,70 @@ contract dWorkSharesManager is ERC1155, Ownable {
         super.safeBatchTransferFrom(from, to, ids, values, data);
     }
 
+    /**
+     * @param _workTokenId The token id of the work that was fractionalized on dWork.sol
+     * @dev Pauses the shares of a work that was fractionalized on dWork.sol (triggered by dWork.sol when discrepancies are found during the work verification process)
+     */
+    function pauseShares(uint256 _workTokenId) external onlyDWork {
+        uint256 sharesTokenId = s_sharesTokenIdByWorkId[_workTokenId];
+        IDWorkSharesManager.WorkShares storage workShares = s_workShares[
+            sharesTokenId
+        ];
+        workShares.isPaused = true;
+        emit SharesPaused(workShares, true);
+    }
+
+    /**
+     * @param _workTokenId The token id of the work that was fractionalized on dWork.sol
+     * @dev Unpauses the shares of a work that was fractionalized on dWork.sol
+     */
+    function unpauseShares(uint256 _workTokenId) external onlyDWork {
+        uint256 sharesTokenId = s_sharesTokenIdByWorkId[_workTokenId];
+        IDWorkSharesManager.WorkShares storage workShares = s_workShares[
+            sharesTokenId
+        ];
+        workShares.isPaused = false;
+        emit SharesPaused(workShares, false);
+    }
+
+    function setDWorkAddress(address _dWork) external onlyOwner {
+        s_dWork = _dWork;
+    }
+
+    function enableChain(
+        uint64 _chainSelector,
+        address _xWorkAddress
+    ) external onlyOwner {
+        s_chains[_chainSelector] = _xWorkAddress;
+    }
+
     ////////////////////
     // Internal
     ////////////////////
+
+    function _onWorkSold(
+        uint256 _sharesTokenId,
+        uint256 _sellValueUSDC
+    ) internal {
+        IDWorkSharesManager.WorkShares storage workShares = s_workShares[
+            _sharesTokenId
+        ];
+
+        if (
+            _sellValueUSDC == 0 ||
+            workShares.maxShareSupply == 0 ||
+            _sellValueUSDC < workShares.maxShareSupply
+        ) {
+            revert dWorkSharesManager__SellValueError();
+        }
+
+        workShares.isRedeemable = true;
+        workShares.redeemableValuePerShare =
+            _sellValueUSDC /
+            workShares.maxShareSupply;
+
+        s_totalRedeemableValuePerWork[_sharesTokenId] = _sellValueUSDC;
+    }
 
     function _ensureOnlydWork() internal view {
         if (msg.sender != s_dWork) {
@@ -402,7 +584,9 @@ contract dWorkSharesManager is ERC1155, Ownable {
     }
 
     function _ensureSharesNotPaused(uint256 _sharesTokenId) internal view {
-        WorkShares storage workShares = s_workShares[_sharesTokenId];
+        IDWorkSharesManager.WorkShares storage workShares = s_workShares[
+            _sharesTokenId
+        ];
         if (workShares.isPaused) {
             revert dWorkSharesManager__SharesPaused();
         }
@@ -412,7 +596,9 @@ contract dWorkSharesManager is ERC1155, Ownable {
         uint256[] memory _sharesTokenIds
     ) internal view {
         for (uint256 i = 1; i < _sharesTokenIds.length; i++) {
-            WorkShares storage workShares = s_workShares[_sharesTokenIds[i]];
+            IDWorkSharesManager.WorkShares storage workShares = s_workShares[
+                _sharesTokenIds[i]
+            ];
             if (workShares.isPaused) {
                 revert dWorkSharesManager__SharesPaused();
             }
@@ -464,8 +650,15 @@ contract dWorkSharesManager is ERC1155, Ownable {
 
     function getWorkSharesByTokenId(
         uint256 _sharesTokenId
-    ) public view returns (WorkShares memory) {
+    ) public view returns (IDWorkSharesManager.WorkShares memory) {
         return s_workShares[_sharesTokenId];
+    }
+
+    function getWorkShareByWorkTokenId(
+        uint256 _workTokenId
+    ) external view returns (IDWorkSharesManager.WorkShares memory) {
+        uint256 sharesTokenId = getSharesTokenIdByWorkId(_workTokenId);
+        return getWorkSharesByTokenId(sharesTokenId);
     }
 
     function getLastMarketShareItemId() external view returns (uint256) {
@@ -485,7 +678,7 @@ contract dWorkSharesManager is ERC1155, Ownable {
     }
 
     function getNativeTokenPriceUsd() external view returns (uint256) {
-        (, int256 answer, , , ) = s_priceFeed.latestRoundData();
+        (, int256 answer, , , ) = s_nativePriceFeed.latestRoundData();
         return uint256(answer * 10000000000);
     }
 
@@ -498,5 +691,25 @@ contract dWorkSharesManager is ERC1155, Ownable {
         }
 
         return items;
+    }
+
+    function onERC1155Received(
+        address operator,
+        address from,
+        uint256 id,
+        uint256 value,
+        bytes calldata data
+    ) external returns (bytes4) {
+        return this.onERC1155Received.selector;
+    }
+
+    function onERC1155BatchReceived(
+        address operator,
+        address from,
+        uint256[] calldata ids,
+        uint256[] calldata values,
+        bytes calldata data
+    ) external returns (bytes4) {
+        return this.onERC1155BatchReceived.selector;
     }
 }

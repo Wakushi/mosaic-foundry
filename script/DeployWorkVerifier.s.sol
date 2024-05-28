@@ -13,7 +13,7 @@ contract DeployWorkVerifier is Script {
     string constant CERTIFICATE_EXTRACTION_SOURCE =
         "./functions/sources/certificate-extraction-source.js";
     bytes constant DON_SECRETS_REFERENCE =
-        hex"a266736c6f744964006776657273696f6e1a664da557";
+        hex"a266736c6f744964006776657273696f6e1a66561325";
 
     function run() external {
         IGetWorkVerifierReturnTypes.GetWorkVerifierReturnType
@@ -45,7 +45,12 @@ contract DeployWorkVerifier is Script {
             bytes32 donId,
             address functionsRouter,
             ,
-            uint64 functionsSubId
+            uint64 functionsSubId,
+            ,
+            ,
+            ,
+            ,
+
         ) = helperConfig.activeNetworkConfig();
 
         string memory verificationSource = vm.readFile(WORK_VERIFIATION_SOURCE);
