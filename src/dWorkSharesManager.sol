@@ -30,6 +30,7 @@ contract dWorkSharesManager is
     struct MarketShareItem {
         uint256 itemId;
         uint256 sharesTokenId;
+        uint256 amount;
         uint256 priceUsd;
         address seller;
         bool isSold;
@@ -310,6 +311,7 @@ contract dWorkSharesManager is
         s_marketShareItems[s_marketShareItemId] = MarketShareItem({
             itemId: s_marketShareItemId,
             sharesTokenId: _sharesTokenId,
+            amount: _amount,
             priceUsd: _priceUsd,
             seller: msg.sender,
             isSold: false
