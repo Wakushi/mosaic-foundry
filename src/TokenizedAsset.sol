@@ -9,6 +9,7 @@ import {IDWorkConfig} from "./interfaces/IDWorkConfig.sol";
 import {IWorkVerifier} from "./interfaces/IWorkVerifier.sol";
 import {IDWorkSharesManager} from "./interfaces/IDWorkSharesManager.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Base64} from "@openzeppelin/contracts/utils/Base64.sol";
 
 contract TokenizedAsset is ERC721, ERC721Burnable, Ownable {
     struct TokenizedWork {
@@ -70,7 +71,7 @@ contract TokenizedAsset is ERC721, ERC721Burnable, Ownable {
         VerificationStep step
     );
     event CertificateExtractionError(uint256 indexed tokenizationRequestId);
-    event WorkVerificationError(uint256 tokenizationRequestId);
+    event WorkVerificationError(uint256 indexed tokenizationRequestId);
     event LastVerificationFailed(
         string previousOwner,
         uint256 previousPrice,
@@ -289,8 +290,8 @@ contract TokenizedAsset is ERC721, ERC721Burnable, Ownable {
         string[] memory _args = new string[](4);
         _args[0] = tokenizedWork.customerSubmissionIPFSHash;
         _args[1] = tokenizedWork.appraiserReportIPFSHash;
-        _args[2] = tokenizedWork.certificate.artist;
-        _args[3] = tokenizedWork.certificate.work;
+        _args[2] = Base64.encode(bytes(tokenizedWork.certificate.artist));
+        _args[3] = Base64.encode(bytes(tokenizedWork.certificate.work));
 
         tokenizedWork.verificationStep = VerificationStep
             .PendingWorkVerification;
@@ -338,15 +339,17 @@ contract TokenizedAsset is ERC721, ERC721Burnable, Ownable {
         string memory _ownerName,
         uint256 _priceUsd
     ) internal {
+        TokenizedWork storage tokenizedWork = s_tokenizationRequests[
+            _tokenizationRequestId
+        ];
         // Within the Chainlink Functions request, the computation will return a price of 0 if discrepancies are found.
         if (_priceUsd == 0) {
+            tokenizedWork.verificationStep = VerificationStep
+                .PendingCertificateAnalysis;
             emit WorkVerificationError(_tokenizationRequestId);
             return;
         }
 
-        TokenizedWork storage tokenizedWork = s_tokenizationRequests[
-            _tokenizationRequestId
-        ];
         tokenizedWork.verificationStep = VerificationStep.WorkVerificationDone;
         s_tokenizationRequests[_tokenizationRequestId].lastVerifiedAt = block
             .timestamp;

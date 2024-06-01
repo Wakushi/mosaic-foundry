@@ -6,6 +6,7 @@ import {HelperConfig} from "./HelperConfig.s.sol";
 import {WorkVerifier} from "../src/WorkVerifier.sol";
 import {IGetWorkVerifierReturnTypes} from "../src/interfaces/IGetWorkVerifierReturnTypes.sol";
 import {IFunctionsSubscriptions} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/interfaces/IFunctionsSubscriptions.sol";
+import "forge-std/console.sol";
 
 contract DeployWorkVerifier is Script {
     string constant WORK_VERIFIATION_SOURCE =
@@ -13,7 +14,7 @@ contract DeployWorkVerifier is Script {
     string constant CERTIFICATE_EXTRACTION_SOURCE =
         "./functions/sources/certificate-extraction-source.js";
     bytes constant DON_SECRETS_REFERENCE =
-        hex"a266736c6f744964006776657273696f6e1a66561325";
+        hex"a266736c6f744964006776657273696f6e1a665a3aee";
 
     function run() external {
         IGetWorkVerifierReturnTypes.GetWorkVerifierReturnType
@@ -54,6 +55,7 @@ contract DeployWorkVerifier is Script {
         ) = helperConfig.activeNetworkConfig();
 
         string memory verificationSource = vm.readFile(WORK_VERIFIATION_SOURCE);
+        console.log(verificationSource);
         string memory certificateSource = vm.readFile(
             CERTIFICATE_EXTRACTION_SOURCE
         );

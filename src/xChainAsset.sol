@@ -182,7 +182,6 @@ contract xChainAsset is
         virtual
         override
         onlyRouter
-        nonReentrant
         onlyEnabledChain(message.sourceChainSelector)
         onlyEnabledSender(
             message.sourceChainSelector,

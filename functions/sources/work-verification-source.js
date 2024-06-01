@@ -1,4 +1,5 @@
 const { ethers } = await import("npm:ethers@6.10.0")
+// const { Base64 } = await import("npm:js-base64")
 const abiCoder = ethers.AbiCoder.defaultAbiCoder()
 
 ///////////////////////// CONSTANTS  /////////////////////////
@@ -70,6 +71,7 @@ async function fetchWorkMarketData(work) {
       lastSalePrice: marketData.lastSalePrice,
     }
   } catch (error) {
+    console.log(error)
     throw new Error("Error fetching work market data")
   }
 }
@@ -121,7 +123,7 @@ async function organizeData(aggregatedData) {
     data: {
       model: "gpt-4o",
       response_format: { type: "json_object" },
-      seed: 7,
+      seed: 1996,
       messages: [
         {
           role: "system",
@@ -161,11 +163,18 @@ function getDiscrepancies(organizedData) {
   return discrepancies
 }
 
+// function decodeBase64(encoded) {
+//   return Base64.decode(encoded)
+// }
+
 ///////////////////////// MAIN /////////////////////////
 const customerSubmissionHash = args[0]
 const reportHash = args[1]
-const certificateArtist = args[2]
-const certificateWorkTitle = args[3]
+const certificateArtistRaw = args[2]
+const certificateWorkTitleRaw = args[3]
+
+// const certificateArtist = decodeBase64(certificateArtistRaw)
+// const certificateWorkTitle = decodeBase64(certificateWorkTitleRaw)
 
 if (!secrets.openaiApiKey) {
   throw new Error("OpenAI API key is required")
@@ -185,13 +194,16 @@ try {
     sanitizedData[key] = collection
   })
 
-  sanitizedData.artist.push(certificateArtist)
-  sanitizedData.title.push(certificateWorkTitle)
-
+  // sanitizedData.artist.push(certificateArtist)
+  // sanitizedData.title.push(certificateWorkTitle)
+  console.log(sanitizedData)
   const discrepancies = getDiscrepancies(sanitizedData)
 
   if (discrepancies.length > 0) {
-    const encoded = abiCoder.encode(["string", "uint256"], ["error", 0])
+    const encoded = abiCoder.encode(
+      ["string", "uint256"],
+      [JSON.stringify(discrepancies), 0]
+    )
     return ethers.getBytes(encoded)
   } else {
     const encoded = abiCoder.encode(
@@ -201,7 +213,9 @@ try {
     return ethers.getBytes(encoded)
   }
 } catch (error) {
-  console.log(error)
-  const encoded = abiCoder.encode(["string", "uint256"], ["error", 0])
+  const encoded = abiCoder.encode(
+    ["string", "uint256"],
+    [JSON.stringify(error), 0]
+  )
   return ethers.getBytes(encoded)
 }

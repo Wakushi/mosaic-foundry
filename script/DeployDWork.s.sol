@@ -6,8 +6,8 @@ import {HelperConfig} from "./HelperConfig.s.sol";
 import {dWork} from "../src/dWork.sol";
 
 contract DeployDWork is Script {
-    address WORK_VERIFIER_CONTRACT = 0x65a03bb314220C6be26AA273C951bf06739f619a;
-    address WORK_SHARES_MANAGER = 0x7AdA800898fB8ff735f39d8C2D497AD8894460aF;
+    address WORK_VERIFIER_CONTRACT = 0xa81bcb1DCbe2956E2e332ea83BC661Eb045A95bd;
+    address WORK_SHARES_MANAGER = 0xc75d7685EB02216B1D273337D31be185A4A48a24;
 
     function run() external returns (dWork) {
         HelperConfig helperConfig = new HelperConfig();
