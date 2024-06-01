@@ -460,11 +460,7 @@ contract dWorkSharesManager is
         s_totalRedeemableValuePerWork[_shareTokenId] -= redeemableValue;
         _burn(msg.sender, _shareTokenId, _shareAmount);
 
-        bool success = IERC20(i_usdc).transferFrom(
-            address(this),
-            msg.sender,
-            redeemableValue
-        );
+        bool success = IERC20(i_usdc).transfer(msg.sender, redeemableValue);
 
         if (!success) {
             revert dWorkSharesManager__TransferFailedOnRedeem();
