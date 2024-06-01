@@ -1,5 +1,5 @@
 const { ethers } = await import("npm:ethers@6.10.0")
-// const { Base64 } = await import("npm:js-base64")
+const { Base64 } = await import("npm:js-base64")
 const abiCoder = ethers.AbiCoder.defaultAbiCoder()
 
 ///////////////////////// CONSTANTS  /////////////////////////
@@ -163,9 +163,9 @@ function getDiscrepancies(organizedData) {
   return discrepancies
 }
 
-// function decodeBase64(encoded) {
-//   return Base64.decode(encoded)
-// }
+function decodeBase64(encoded) {
+  return Base64.decode(encoded)
+}
 
 ///////////////////////// MAIN /////////////////////////
 const customerSubmissionHash = args[0]
@@ -173,8 +173,13 @@ const reportHash = args[1]
 const certificateArtistRaw = args[2]
 const certificateWorkTitleRaw = args[3]
 
-// const certificateArtist = decodeBase64(certificateArtistRaw)
-// const certificateWorkTitle = decodeBase64(certificateWorkTitleRaw)
+// We had to encode the artist and title to base64 because we found issues
+// with special characters being encoded in a wrong way when received as args.
+// Example: 'Nymphéas' was being received as 'NympÃ©s'
+// This is a workaround to avoid encoding issues.
+
+const certificateArtist = decodeBase64(certificateArtistRaw)
+const certificateWorkTitle = decodeBase64(certificateWorkTitleRaw)
 
 if (!secrets.openaiApiKey) {
   throw new Error("OpenAI API key is required")
@@ -194,9 +199,9 @@ try {
     sanitizedData[key] = collection
   })
 
-  // sanitizedData.artist.push(certificateArtist)
-  // sanitizedData.title.push(certificateWorkTitle)
-  console.log(sanitizedData)
+  sanitizedData.artist.push(certificateArtist)
+  sanitizedData.title.push(certificateWorkTitle)
+
   const discrepancies = getDiscrepancies(sanitizedData)
 
   if (discrepancies.length > 0) {
