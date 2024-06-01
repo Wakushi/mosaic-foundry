@@ -2,8 +2,9 @@
 
 ## Team
 
-[Camillemtd](https://github.com/Camillemtd): Fullstack Typescript and ThreeJS developer
-[Wakushi](https://github.com/Wakushi): Blockchain developer
+- [Camillemtd](https://github.com/Camillemtd): Fullstack Typescript and ThreeJS developer
+
+- [Wakushi](https://github.com/Wakushi): Blockchain developer
 
 ## Inspiration
 
