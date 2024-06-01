@@ -91,6 +91,7 @@ contract dWorkSharesManager is
         address buyer
     );
     event MarketShareItemUnlisted(uint256 marketShareItemId);
+    event ShareRedeemable(uint256 sharesTokenId);
 
     //////////////////
     // Errors
@@ -575,6 +576,7 @@ contract dWorkSharesManager is
             workShares.maxShareSupply;
 
         s_totalRedeemableValuePerWork[_sharesTokenId] = _sellValueUSDC;
+        emit ShareRedeemable(_sharesTokenId);
     }
 
     function _ensureOnlydWork() internal view {

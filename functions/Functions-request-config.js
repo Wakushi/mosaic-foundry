@@ -29,10 +29,10 @@ function getSourceConfig(source) {
           .readFileSync("./functions/sources/work-verification-source.js")
           .toString(),
         args: [
-          "QmXe7nD33yCx9MRBzuX5PjYxKG5iFf3tHiLkjp6Lsp2nwD", // CUSTOMER SUBMISSION HASH
-          "QmcMAKn11ZCFuxCU8DP6iKt2pWY9fcW1HMTXyVuz7iNCNw", // REPORT HASH
-          "CLAUDE MONET", // CERTIFICATE ARTIST
-          "waterloo bridge, brouillard", // CERTIFICATE WORK TITLE
+          "QmP74gB5pXhSFPykXGLDJjjzrwuXzjY6uVP2E67E7khQkr", // CUSTOMER SUBMISSION HASH
+          "QmfS68JLVCenhuyvJ2rPQ93etDWWSFeAJJ7onAdTN4CCpX", // REPORT HASH
+          "Q2xhdWRlIG1vbmV0", // CERTIFICATE ARTIST
+          "Q29pbiBkdSBiYXNzaW4gYXV4IG55bXBow6lhcw==", // CERTIFICATE WORK TITLE
         ],
       }
     case "certificate-extraction":
@@ -41,7 +41,7 @@ function getSourceConfig(source) {
           .readFileSync("./functions/sources/certificate-extraction-source.js")
           .toString(),
         args: [
-          "QmcYLvdwSZXuoXiWCqW5xYhbXjvkU4QkfosqLfZQQiqoky", // CERTIFICATE IMAGE HASH
+          "QmUbdmBcAEQccxNdUXQVX4UckVbQjsAt33SoQChbr1pk9q", // CERTIFICATE IMAGE HASH
         ],
       }
     default:

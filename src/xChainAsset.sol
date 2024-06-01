@@ -177,18 +177,7 @@ contract xChainAsset is
      */
     function ccipReceive(
         Client.Any2EVMMessage calldata message
-    )
-        external
-        virtual
-        override
-        onlyRouter
-        nonReentrant
-        onlyEnabledChain(message.sourceChainSelector)
-        onlyEnabledSender(
-            message.sourceChainSelector,
-            abi.decode(message.sender, (address))
-        )
-    {
+    ) external virtual override onlyRouter {
         IDWorkConfig.xChainWorkTokenTransferData memory workData = _decodeWhole(
             message.data
         );

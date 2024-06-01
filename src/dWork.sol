@@ -5,7 +5,6 @@ pragma solidity ^0.8.19;
 // Chainlink
 import {Log, ILogAutomation} from "@chainlink/contracts/src/v0.8/automation/interfaces/ILogAutomation.sol";
 // OpenZeppelin
-import {Base64} from "@openzeppelin/contracts/utils/Base64.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 // Custom
@@ -210,7 +209,7 @@ contract dWork is xChainAsset, ILogAutomation {
         _ensureWorkOwner(tokenizedWork.owner);
         tokenizedWork.listingPriceUsd = 0;
         tokenizedWork.isListed = false;
-        _update(msg.sender, _workTokenId, msg.sender);
+        _update(msg.sender, _workTokenId, address(this));
     }
 
     /**
@@ -240,11 +239,6 @@ contract dWork is xChainAsset, ILogAutomation {
             revert dWork__TransferFailed();
         }
 
-        address previousOwner = tokenizedWork.owner;
-
-        // Update the tokenized work data
-        _updateTokenizedWorkOnSale(tokenizedWork);
-
         // Transfer the work token to the buyer
         _update(msg.sender, _workTokenId, address(this));
 
@@ -261,11 +255,7 @@ contract dWork is xChainAsset, ILogAutomation {
             } else {
                 // If the shares were minted on the same chain as the associated work is on, we transfer the USDC value to the WorkSharesManager contract.
                 if (
-                    !IERC20(i_usdc).transferFrom(
-                        address(this),
-                        s_workSharesManager,
-                        sellValueUSDC
-                    )
+                    !IERC20(i_usdc).transfer(s_workSharesManager, sellValueUSDC)
                 ) {
                     revert dWork__TransferFailed();
                 }
@@ -277,16 +267,13 @@ contract dWork is xChainAsset, ILogAutomation {
             }
         } else {
             // If the work is not fractionalized, we transfer the USDC value to the previous work owner.
-            if (
-                !IERC20(i_usdc).transferFrom(
-                    address(this),
-                    previousOwner,
-                    sellValueUSDC
-                )
-            ) {
+            if (!IERC20(i_usdc).transfer(tokenizedWork.owner, sellValueUSDC)) {
                 revert dWork__TransferFailed();
             }
         }
+
+        // Update the tokenized work data
+        _updateTokenizedWorkOnSale(tokenizedWork);
     }
 
     /**

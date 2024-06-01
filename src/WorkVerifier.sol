@@ -150,6 +150,18 @@ contract WorkVerifier is FunctionsClient, Ownable {
         s_secretReference = _secretReference;
     }
 
+    function updateWorkVerificationSource(
+        string calldata _newSource
+    ) external onlyOwner {
+        s_workVerificationSource = _newSource;
+    }
+
+    function updateCertificateExtractionSource(
+        string calldata _newSource
+    ) external onlyOwner {
+        s_certificateExtractionSource = _newSource;
+    }
+
     ////////////////////
     // Internal
     ////////////////////
