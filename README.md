@@ -6,6 +6,39 @@
 
 - [Wakushi](https://github.com/Wakushi): Blockchain developer
 
+## Deployment setup
+
+### 1. Update DON Hosted Secrets
+
+In **functions/upload-secret.js** you'll find a script (with hardcoded values for Polygon Amoy) to deploy your encrypted secrets to the DON,
+since we'll be using OpenAI API for computation using Chainlink Functions.
+We recommand to use the 'npx env-enc' commands to safely set your secrets and then run the script, which will output a reference
+to the uploaded secrets (_example output: 'Oxa266736c6f744964006776657273696f6e1a665a3aee'_).
+You can then update the **DON_SECRETS_REFERENCE** variable in **script/DeployWorkVerifier.s.sol** with the reference.
+
+### 2. Deploy the contracts
+
+You can deploy the contracts using the following make commands.
+Once you've deployed WorkVerifier.sol and dWorkSharesManager.sol, update the script/DeployDWork.s.sol script with their addresses.
+
+```bash
+make deployVerifier ARGS="--network amoy"
+make deployShares ARGS="--network amoy"
+make deployWork ARGS="--network amoy"
+```
+
+### 3. Post deployment actions
+
+After deploying the contracts, perform the following steps to configure the contracts properly:
+
+1. Call _setDWorkAddress()_ on the deployed dWorkSharesManager.sol and WorkVerifier.sol with the address of the deployed dWork.sol.
+2. Call _enableChain()_ on dWorkSharesManager.sol with the OP/Amoy chain selector and the dWork.sol address.
+3. Call _enableChain()_ on dWork.sol with the OP/Amoy chain selector and the dWork.sol address.
+4. Call _setChainSharesManager()_ on dWork.sol with the OP/Amoy chain selector and the dWorkSharesManager.sol address.
+5. Ensure that dWork.sol and dWorkSharesManager.sol are funded with the LINK token (for CCIP usage).
+6. Head to Chainlink Upkeep dashboard and register a log-based automation to automate your deployed dWork contract using
+   WorkVerifier and its _VerifierTaskDone()_ event. (ABI for WorkVerifier can be found in **out/WorkVerifier/WorkVerifier.json** after a deploy).
+
 ## Inspiration
 
 The inspiration for Mosaic comes from observing the **inefficiencies** and **barriers** in the traditional art market. Transactions often take multiple days and involve significant **counterparty risks**, making **trust** a major issue. Additionally, many galleries still use outdated, inefficient methods like paper records or deprecated software to manage assets, leading to further inefficiencies.
